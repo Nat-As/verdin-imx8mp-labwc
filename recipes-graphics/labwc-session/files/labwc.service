@@ -1,0 +1,62 @@
+# System unit that starts labwc on tty7 as the unprivileged user "dev".
+#
+# Modelled on OE-core's weston.service: PAM (pam_systemd) creates a logind
+# session on seat0, and wlroots uses libseat's logind backend to get DRM and
+# input device access, so the compositor does not need to run as root.
+[Unit]
+Description=labwc Wayland compositor (autologin session for user dev)
+Documentation=man:labwc(1) https://labwc.github.io/
+
+# Start after logins are permitted.
+Requires=systemd-user-sessions.service
+After=systemd-user-sessions.service
+After=plymouth-quit-wait.service
+
+# D-Bus and logind are needed for the session and seat management.
+Wants=dbus.socket
+After=dbus.socket systemd-logind.service
+
+# Part of the graphical session.
+Before=graphical.target
+
+# A virtual terminal is required.
+ConditionPathExists=/dev/tty0
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/labwc
+
+# Wait for the display (and GPU, if present) DRM devices, as Toradex's
+# weston.service does.
+ExecStartPre=-/usr/bin/udevadm wait --timeout=30 /dev/dri/card0
+ExecStartPre=-/bin/sh -c "ls /dev/dri/by-path/*gpu* >/dev/null 2>&1 && /usr/bin/udevadm wait --timeout=30 /dev/dri/card1"
+
+ExecStart=/usr/bin/labwc-session
+
+User=dev
+Group=dev
+WorkingDirectory=~
+
+# Full user session (XDG_RUNTIME_DIR, logind seat, user D-Bus).
+PAMName=labwc-autologin
+
+# A virtual terminal is needed.
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+# Fail to start if not controlling the tty.
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+
+# Show up in 'w' and 'who'.
+UtmpIdentifier=tty7
+UtmpMode=user
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

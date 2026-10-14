@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Root menu: right-click on the desktop (or Super+M). man 5 labwc-menu -->
+<openbox_menu>
+
+<menu id="client-menu">
+  <item label="Minimize"><action name="Iconify" /></item>
+  <item label="Maximize"><action name="ToggleMaximize" /></item>
+  <item label="Fullscreen"><action name="ToggleFullscreen" /></item>
+  <item label="Always on Top"><action name="ToggleAlwaysOnTop" /></item>
+  <item label="Close"><action name="Close" /></item>
+</menu>
+
+<menu id="system-menu" label="System">
+  <item label="Reconfigure labwc"><action name="Reconfigure" /></item>
+  <item label="Exit labwc (restarts session)"><action name="Exit" /></item>
+  <separator />
+  <item label="Reboot"><action name="Execute" command="systemctl reboot" /></item>
+  <item label="Power off"><action name="Execute" command="systemctl poweroff" /></item>
+</menu>
+
+<menu id="root-menu">
+  <item label="Terminal"><action name="Execute" command="foot" /></item>
+  <item label="Applications…"><action name="Execute" command="fuzzel" /></item>
+  <item label="System monitor (htop)"><action name="Execute" command="foot -T htop htop" /></item>
+  <separator />
+  <menu id="system-menu" />
+</menu>
+
+</openbox_menu>

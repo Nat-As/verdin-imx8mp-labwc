@@ -1,0 +1,15 @@
+# Environment for labwc.service (read by systemd, then by labwc-session).
+#
+# Renderer: leave unset to try the hardware GLES2 renderer first, with an
+# automatic fallback to software rendering. Force one with:
+#WLR_RENDERER=pixman
+#WLR_RENDERER=gles2
+
+# Uncomment if the cursor is invisible or corrupted on your display.
+#WLR_NO_HARDWARE_CURSORS=1
+
+# Restrict wlroots to a specific DRM device, e.g. if more than one exists.
+#WLR_DRM_DEVICES=/dev/dri/card0
+
+# Keyboard layout (also settable in /etc/xdg/labwc/environment).
+#XKB_DEFAULT_LAYOUT=us

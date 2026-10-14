@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<!--
+  System-wide labwc defaults for the labwc demo image.
+  Copy to ~/.config/labwc/rc.xml to customise per user.
+  Full reference: man 5 labwc-config
+-->
+<labwc_config>
+
+  <core>
+    <decoration>server</decoration>
+    <gap>4</gap>
+  </core>
+
+  <theme>
+    <name></name>
+    <cornerRadius>6</cornerRadius>
+    <font place="ActiveWindow" name="DejaVu Sans" size="10" weight="bold" />
+    <font place="InactiveWindow" name="DejaVu Sans" size="10" />
+    <font place="MenuItem" name="DejaVu Sans" size="10" />
+    <font place="OnScreenDisplay" name="DejaVu Sans" size="10" />
+  </theme>
+
+  <placement>
+    <policy>cascade</policy>
+  </placement>
+
+  <keyboard>
+    <default />
+    <!-- Super+Return / Ctrl+Alt+T: terminal -->
+    <keybind key="W-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <!-- Super+D / Super+Space: application launcher -->
+    <keybind key="W-d">
+      <action name="Execute" command="fuzzel" />
+    </keybind>
+    <keybind key="W-space">
+      <action name="Execute" command="fuzzel" />
+    </keybind>
+    <!-- Super+M: root menu -->
+    <keybind key="W-m">
+      <action name="ShowMenu" menu="root-menu" />
+    </keybind>
+    <!-- Super+Q: close window -->
+    <keybind key="W-q">
+      <action name="Close" />
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <default />
+  </mouse>
+
+  <!-- Enable tap-to-click on touchpads / touchscreens -->
+  <libinput>
+    <device category="default">
+      <tap>yes</tap>
+    </device>
+  </libinput>
+
+</labwc_config>

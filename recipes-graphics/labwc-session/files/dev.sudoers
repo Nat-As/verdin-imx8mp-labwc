@@ -1,0 +1,2 @@
+# Development login: allow the "dev" user to use sudo (password: dev)
+dev ALL=(ALL:ALL) ALL

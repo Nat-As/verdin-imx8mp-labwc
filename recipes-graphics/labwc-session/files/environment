@@ -1,0 +1,3 @@
+# labwc session environment (system default). man 5 labwc-config
+XKB_DEFAULT_LAYOUT=us
+XCURSOR_SIZE=24

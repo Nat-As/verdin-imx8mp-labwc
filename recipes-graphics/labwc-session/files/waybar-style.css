@@ -1,0 +1,42 @@
+* {
+    font-family: "DejaVu Sans", "Font Awesome 6 Free", "Font Awesome 6 Brands", sans-serif;
+    font-size: 13px;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+}
+
+window#waybar {
+    background-color: rgba(20, 24, 33, 0.92);
+    color: #e6e9ef;
+}
+
+#custom-launcher, #custom-terminal, #custom-power,
+#clock, #cpu, #memory, #temperature, #network {
+    padding: 0 10px;
+}
+
+#custom-launcher {
+    background-color: #457b9d;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+#custom-power {
+    color: #e63946;
+}
+
+#taskbar button {
+    padding: 0 6px;
+    color: #e6e9ef;
+    background: transparent;
+}
+
+#taskbar button.active {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-bottom: 2px solid #a8dadc;
+}
+
+#temperature.critical {
+    color: #e63946;
+}

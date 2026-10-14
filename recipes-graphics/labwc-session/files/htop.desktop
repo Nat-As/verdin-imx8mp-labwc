@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=System Monitor (htop)
+Comment=Process viewer
+Exec=foot -T htop htop
+Terminal=false
+Categories=System;Monitor;

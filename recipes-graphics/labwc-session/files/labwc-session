@@ -1,0 +1,43 @@
+#!/bin/sh
+# labwc session launcher used by labwc.service.
+#
+# Renderer selection:
+#  - If WLR_RENDERER is set (e.g. in /etc/default/labwc), it is used as is.
+#  - Otherwise labwc starts with wlroots' automatic selection, which tries the
+#    hardware GLES2 renderer (Vivante/imx-gpu-viv) first. If labwc exits with
+#    an error within LABWC_FALLBACK_WINDOW seconds, it is restarted with the
+#    pixman software renderer so the board still comes up with a desktop.
+#
+# The renderer actually in use is recorded in $XDG_RUNTIME_DIR/labwc-renderer.
+
+LABWC_FALLBACK_WINDOW=${LABWC_FALLBACK_WINDOW:-20}
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-labwc:wlroots}
+export GDK_BACKEND=${GDK_BACKEND:-wayland}
+export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland}
+export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-wayland}
+
+state="${XDG_RUNTIME_DIR:-/tmp}/labwc-renderer"
+
+if [ -n "$WLR_RENDERER" ]; then
+    echo "labwc-session: using WLR_RENDERER=$WLR_RENDERER (forced)"
+    echo "$WLR_RENDERER (forced)" > "$state"
+    exec labwc "$@"
+fi
+
+echo "labwc-session: trying hardware rendering (wlroots auto: gles2, then pixman)"
+echo "auto" > "$state"
+start=$(date +%s)
+labwc "$@"
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+
+if [ "$rc" -ne 0 ] && [ "$elapsed" -lt "$LABWC_FALLBACK_WINDOW" ]; then
+    echo "labwc-session: labwc exited with $rc after ${elapsed}s, falling back to WLR_RENDERER=pixman"
+    echo "pixman (fallback)" > "$state"
+    export WLR_RENDERER=pixman
+    exec labwc "$@"
+fi
+
+exit "$rc"
