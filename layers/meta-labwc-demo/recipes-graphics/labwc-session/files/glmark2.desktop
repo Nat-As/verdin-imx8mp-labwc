@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=GPU Benchmark (glmark2)
+Comment=OpenGL ES 2.0 benchmark (Wayland)
+Exec=foot -T glmark2 sh -c "glmark2-es2-wayland; echo; echo Press Enter to close; read x"
+Terminal=false
+Categories=System;

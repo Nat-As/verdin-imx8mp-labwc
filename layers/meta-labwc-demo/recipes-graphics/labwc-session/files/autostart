@@ -1,0 +1,12 @@
+# labwc autostart (system default). Runs once when the session starts.
+# Per-user override: ~/.config/labwc/autostart
+
+# Wallpaper (falls back to a solid colour if the image is missing)
+if [ -f /usr/share/backgrounds/labwc-demo/wallpaper.png ]; then
+	swaybg -m fill -i /usr/share/backgrounds/labwc-demo/wallpaper.png >/dev/null 2>&1 &
+else
+	swaybg -c '#1d3557' >/dev/null 2>&1 &
+fi
+
+# Panel
+waybar >/dev/null 2>&1 &

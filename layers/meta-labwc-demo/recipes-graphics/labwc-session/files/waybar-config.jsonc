@@ -1,0 +1,57 @@
+// Waybar config for the labwc demo image. Per-user override:
+// ~/.config/waybar/config.jsonc
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "spacing": 6,
+    "modules-left": ["custom/launcher", "wlr/taskbar"],
+    "modules-center": ["clock"],
+    "modules-right": ["network", "cpu", "memory", "temperature", "custom/terminal", "custom/power"],
+
+    "custom/launcher": {
+        "format": "  Apps",
+        "tooltip-format": "Application launcher (Super+D)",
+        "on-click": "fuzzel"
+    },
+    "custom/terminal": {
+        "format": "",
+        "tooltip-format": "Terminal (Super+Return)",
+        "on-click": "foot"
+    },
+    "custom/power": {
+        "format": "",
+        "tooltip-format": "Left: power off, right: reboot",
+        "on-click": "sudo -n systemctl poweroff",
+        "on-click-right": "sudo -n systemctl reboot"
+    },
+    "wlr/taskbar": {
+        "format": "{title:.24}",
+        "on-click": "activate",
+        "on-click-middle": "close",
+        "tooltip-format": "{title}"
+    },
+    "clock": {
+        "format": "{:%a %d %b  %H:%M}",
+        "tooltip-format": "{:%Y-%m-%d %H:%M:%S}"
+    },
+    "cpu": {
+        "format": " {usage}%",
+        "interval": 5
+    },
+    "memory": {
+        "format": " {percentage}%",
+        "interval": 10
+    },
+    "temperature": {
+        "thermal-zone": 0,
+        "format": " {temperatureC}°C",
+        "critical-threshold": 90
+    },
+    "network": {
+        "format-ethernet": " {ipaddr}",
+        "format-wifi": " {essid} {ipaddr}",
+        "format-disconnected": "offline",
+        "tooltip-format": "{ifname}: {ipaddr}/{cidr} via {gwaddr}"
+    }
+}

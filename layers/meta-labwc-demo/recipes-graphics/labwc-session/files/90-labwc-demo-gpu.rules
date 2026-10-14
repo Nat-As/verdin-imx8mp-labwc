@@ -1,0 +1,5 @@
+# Unprivileged Wayland session access to the GPU (galcore is already
+# video:0660 via udev-rules-imx; make it explicit and cover DRM render nodes).
+KERNEL=="galcore", MODE="0660", GROUP="video"
+SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666", GROUP="render"
+SUBSYSTEM=="dma_heap", MODE="0664", GROUP="video"
