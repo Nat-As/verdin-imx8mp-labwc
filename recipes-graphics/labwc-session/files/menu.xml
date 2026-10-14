@@ -12,10 +12,10 @@
 
 <menu id="system-menu" label="System">
   <item label="Reconfigure labwc"><action name="Reconfigure" /></item>
-  <item label="Exit labwc (restarts session)"><action name="Exit" /></item>
+  <item label="Restart session"><action name="Exit" /></item>
   <separator />
-  <item label="Reboot"><action name="Execute" command="systemctl reboot" /></item>
-  <item label="Power off"><action name="Execute" command="systemctl poweroff" /></item>
+  <item label="Reboot"><action name="Execute" command="sudo -n systemctl reboot" /></item>
+  <item label="Power off"><action name="Execute" command="sudo -n systemctl poweroff" /></item>
 </menu>
 
 <menu id="root-menu">

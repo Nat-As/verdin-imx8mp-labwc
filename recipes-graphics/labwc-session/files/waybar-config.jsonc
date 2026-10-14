@@ -22,8 +22,8 @@
     "custom/power": {
         "format": "",
         "tooltip-format": "Left: power off, right: reboot",
-        "on-click": "systemctl poweroff",
-        "on-click-right": "systemctl reboot"
+        "on-click": "sudo -n systemctl poweroff",
+        "on-click-right": "sudo -n systemctl reboot"
     },
     "wlr/taskbar": {
         "format": "{title:.24}",

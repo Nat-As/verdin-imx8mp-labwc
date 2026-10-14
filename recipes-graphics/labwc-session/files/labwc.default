@@ -5,6 +5,10 @@
 #WLR_RENDERER=pixman
 #WLR_RENDERER=gles2
 
+# Seat backend (set by labwc.service): seatd. logind needs polkit, which
+# this image does not ship.
+#LIBSEAT_BACKEND=seatd
+
 # Uncomment if the cursor is invisible or corrupted on your display.
 #WLR_NO_HARDWARE_CURSORS=1
 

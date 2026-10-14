@@ -32,6 +32,10 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
     fi
 fi
 
+# Pure Wayland session: a stray DISPLAY (e.g. from a login shell) makes
+# wlroots try its X11 backend, which is not built.
+unset DISPLAY
+
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-labwc:wlroots}
 export GDK_BACKEND=${GDK_BACKEND:-wayland}

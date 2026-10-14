@@ -1,8 +1,13 @@
 # System unit that starts labwc on tty7 as the unprivileged user "dev".
 #
-# Modelled on OE-core's weston.service: PAM (pam_systemd) creates a logind
-# session on seat0, and wlroots uses libseat's logind backend to get DRM and
-# input device access, so the compositor does not need to run as root.
+# Seat/device access: seatd (seatd.service, socket group "video") opens the
+# DRM and input devices for the compositor via libseat, so labwc does not
+# need root. PAM (pam_systemd) still creates a logind session for the user,
+# which provides XDG_RUNTIME_DIR and the user D-Bus session bus.
+#
+# logind is deliberately not used as the libseat backend: on this distro
+# logind authorises Session.Activate via polkit, and the image ships no
+# polkit daemon (see meta-labwc-demo/recipes-core/seatd).
 [Unit]
 Description=labwc Wayland compositor (autologin session for user dev)
 Documentation=man:labwc(1) https://labwc.github.io/
@@ -12,7 +17,11 @@ Requires=systemd-user-sessions.service
 After=systemd-user-sessions.service
 After=plymouth-quit-wait.service
 
-# D-Bus and logind are needed for the session and seat management.
+# Seat management.
+Requires=seatd.service
+After=seatd.service
+
+# D-Bus and logind are needed for the user session.
 Wants=dbus.socket
 After=dbus.socket systemd-logind.service
 
@@ -22,22 +31,33 @@ Before=graphical.target
 # A virtual terminal is required.
 ConditionPathExists=/dev/tty0
 
+# Give up (and leave the text console on tty1) if labwc keeps failing.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
 [Service]
 Type=simple
+Environment=LIBSEAT_BACKEND=seatd
 EnvironmentFile=-/etc/default/labwc
 
 # Wait for the display (and GPU, if present) DRM devices, as Toradex's
 # weston.service does.
 ExecStartPre=-/usr/bin/udevadm wait --timeout=30 /dev/dri/card0
 ExecStartPre=-/bin/sh -c "ls /dev/dri/by-path/*gpu* >/dev/null 2>&1 && /usr/bin/udevadm wait --timeout=30 /dev/dri/card1"
+# seatd binds the compositor to the VT that is active when it connects, so
+# bring tty7 to the foreground first ("+" = run as root).
+ExecStartPre=+/usr/bin/chvt 7
 
 ExecStart=/usr/bin/labwc-session
+
+# Back to the text console when the session ends or fails.
+ExecStopPost=+/usr/bin/chvt 1
 
 User=dev
 Group=dev
 WorkingDirectory=~
 
-# Full user session (XDG_RUNTIME_DIR, logind seat, user D-Bus).
+# Full user session (XDG_RUNTIME_DIR, logind session, user D-Bus).
 PAMName=labwc-autologin
 
 # A virtual terminal is needed.
@@ -55,8 +75,9 @@ StandardError=journal
 UtmpIdentifier=tty7
 UtmpMode=user
 
-Restart=on-failure
-RestartSec=5
+# Also restart after "Exit" from the menu; stop with: systemctl stop labwc
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=graphical.target

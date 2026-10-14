@@ -1,6 +1,6 @@
 SUMMARY = "labwc desktop session for the labwc demo image"
 DESCRIPTION = "systemd unit that autostarts labwc as the unprivileged user 'dev' \
-on tty7 (logind seat via PAM, like OE-core's weston.service), a session \
+on tty7 (seat via seatd, user session via PAM/pam_systemd), a session \
 wrapper with automatic pixman fallback, and default labwc, waybar, foot and \
 fuzzel configuration plus a wallpaper."
 LICENSE = "MIT"
@@ -81,6 +81,7 @@ CONFFILES:${PN} += " \
 
 RDEPENDS:${PN} = " \
     labwc \
+    seatd \
     waybar \
     foot \
     fuzzel \
