@@ -38,6 +38,9 @@ StartLimitBurst=5
 [Service]
 Type=simple
 Environment=LIBSEAT_BACKEND=seatd
+# Start even when no keyboard/mouse/touchscreen is connected yet (wlroots
+# otherwise refuses to start); hotplugged input devices still work.
+Environment=WLR_LIBINPUT_NO_DEVICES=1
 EnvironmentFile=-/etc/default/labwc
 
 # Wait for the display (and GPU, if present) DRM devices, as Toradex's
