@@ -20,8 +20,6 @@ SRC_URI = " \
     file://environment \
     file://waybar-config.jsonc \
     file://waybar-style.css \
-    file://foot.ini \
-    file://fuzzel.ini \
     file://htop.desktop \
     file://glmark2.desktop \
     file://wallpaper.png \
@@ -58,8 +56,6 @@ do_install() {
 
     install -Dm0644 ${WORKDIR}/waybar-config.jsonc ${D}${sysconfdir}/xdg/waybar/config.jsonc
     install -Dm0644 ${WORKDIR}/waybar-style.css ${D}${sysconfdir}/xdg/waybar/style.css
-    install -Dm0644 ${WORKDIR}/foot.ini ${D}${sysconfdir}/xdg/foot/foot.ini
-    install -Dm0644 ${WORKDIR}/fuzzel.ini ${D}${sysconfdir}/xdg/fuzzel/fuzzel.ini
 
     install -Dm0644 ${WORKDIR}/htop.desktop ${D}${datadir}/applications/htop-foot.desktop
     install -Dm0644 ${WORKDIR}/glmark2.desktop ${D}${datadir}/applications/glmark2-es2-wayland.desktop
@@ -83,6 +79,7 @@ CONFFILES:${PN} += " \
     ${sysconfdir}/xdg/waybar/config.jsonc \
     ${sysconfdir}/xdg/waybar/style.css \
 "
+# foot.ini and fuzzel.ini are installed by the foot/fuzzel bbappends
 
 RDEPENDS:${PN} = " \
     labwc \
