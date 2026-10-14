@@ -11,5 +11,11 @@
 # Restrict wlroots to a specific DRM device, e.g. if more than one exists.
 #WLR_DRM_DEVICES=/dev/dri/card0
 
+# Session locale (default en_US.UTF-8, the only locale in the image)
+#LANG=en_US.UTF-8
+
+# labwc arguments (default: -V). Use -d for debug logging.
+#LABWC_ARGS=-d
+
 # Keyboard layout (also settable in /etc/xdg/labwc/environment).
 #XKB_DEFAULT_LAYOUT=us

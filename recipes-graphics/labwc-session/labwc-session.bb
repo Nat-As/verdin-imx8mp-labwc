@@ -20,7 +20,6 @@ SRC_URI = " \
     file://environment \
     file://waybar-config.jsonc \
     file://waybar-style.css \
-    file://htop.desktop \
     file://glmark2.desktop \
     file://wallpaper.png \
 "
@@ -57,7 +56,6 @@ do_install() {
     install -Dm0644 ${WORKDIR}/waybar-config.jsonc ${D}${sysconfdir}/xdg/waybar/config.jsonc
     install -Dm0644 ${WORKDIR}/waybar-style.css ${D}${sysconfdir}/xdg/waybar/style.css
 
-    install -Dm0644 ${WORKDIR}/htop.desktop ${D}${datadir}/applications/htop-foot.desktop
     install -Dm0644 ${WORKDIR}/glmark2.desktop ${D}${datadir}/applications/glmark2-es2-wayland.desktop
 
     install -Dm0644 ${WORKDIR}/wallpaper.png ${D}${datadir}/backgrounds/labwc-demo/wallpaper.png

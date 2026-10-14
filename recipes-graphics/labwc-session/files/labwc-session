@@ -11,6 +11,26 @@
 # The renderer actually in use is recorded in $XDG_RUNTIME_DIR/labwc-renderer.
 
 LABWC_FALLBACK_WINDOW=${LABWC_FALLBACK_WINDOW:-20}
+# Extra labwc arguments. Default -V (info level) so the journal shows which
+# renderer wlroots picked ("Creating GLES2 renderer" / "Creating pixman
+# renderer"); use -d for full debug output.
+LABWC_ARGS=${LABWC_ARGS--V}
+
+# The image ships the en_US locale only (IMAGE_LINGUAS = "en-us"); C.UTF-8 is
+# not installed, and foot refuses to start without a UTF-8 locale.
+export LANG=${LANG:-en_US.UTF-8}
+
+# waybar and other GTK clients need a session bus. pam_systemd normally
+# provides one at $XDG_RUNTIME_DIR/bus (user@.service + dbus.socket); if it
+# is missing, run the whole session under dbus-run-session.
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    elif command -v dbus-run-session >/dev/null 2>&1; then
+        echo "labwc-session: no user D-Bus found, starting one with dbus-run-session"
+        exec dbus-run-session -- "$0" "$@"
+    fi
+fi
 
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-labwc:wlroots}
@@ -23,13 +43,13 @@ state="${XDG_RUNTIME_DIR:-/tmp}/labwc-renderer"
 if [ -n "$WLR_RENDERER" ]; then
     echo "labwc-session: using WLR_RENDERER=$WLR_RENDERER (forced)"
     echo "$WLR_RENDERER (forced)" > "$state"
-    exec labwc "$@"
+    exec labwc $LABWC_ARGS "$@"
 fi
 
 echo "labwc-session: trying hardware rendering (wlroots auto: gles2, then pixman)"
 echo "auto" > "$state"
 start=$(date +%s)
-labwc "$@"
+labwc $LABWC_ARGS "$@"
 rc=$?
 elapsed=$(( $(date +%s) - start ))
 
@@ -37,7 +57,7 @@ if [ "$rc" -ne 0 ] && [ "$elapsed" -lt "$LABWC_FALLBACK_WINDOW" ]; then
     echo "labwc-session: labwc exited with $rc after ${elapsed}s, falling back to WLR_RENDERER=pixman"
     echo "pixman (fallback)" > "$state"
     export WLR_RENDERER=pixman
-    exec labwc "$@"
+    exec labwc $LABWC_ARGS "$@"
 fi
 
 exit "$rc"
