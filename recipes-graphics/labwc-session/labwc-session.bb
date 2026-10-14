@@ -36,7 +36,7 @@ REQUIRED_DISTRO_FEATURES = "wayland systemd pam"
 # The desktop user. Its password ("dev") is set by the image recipe.
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "-r render; -r input; -r wayland"
-USERADD_PARAM:${PN} = "--create-home --home-dir /home/dev --shell /bin/sh \
+USERADD_PARAM:${PN} = "--create-home --home-dir /home/dev --shell /bin/bash \
     --user-group -G video,input,render,audio,wayland dev"
 
 SYSTEMD_SERVICE:${PN} = "labwc.service"
@@ -97,6 +97,7 @@ RDEPENDS:${PN} = " \
     fontconfig-utils \
     xkeyboard-config \
     ncurses-terminfo-base \
+    bash \
     sudo \
     htop \
     kbd \
