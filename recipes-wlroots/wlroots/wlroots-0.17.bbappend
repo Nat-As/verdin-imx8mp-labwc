@@ -16,4 +16,5 @@ EXTRA_OEMESON += " \
 # The recipe installs the tinywl example; we don't ship it
 do_install:append() {
     rm -f ${D}${bindir}/tinywl-0.17
+    rmdir --ignore-fail-on-non-empty ${D}${bindir}
 }
