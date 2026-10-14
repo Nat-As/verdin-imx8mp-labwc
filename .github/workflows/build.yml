@@ -1,0 +1,99 @@
+name: build
+
+# Validates the image definition on every push:
+#  - lint: shell scripts, labwc/manifest XML, waybar JSON
+#  - yocto: syncs the full Toradex BSP + meta-wayland and has BitBake parse
+#    every recipe and resolve the complete task graph of labwc-demo-image.
+# A full compile (~1.5 h on 20 threads, ~50 GB disk) does not fit GitHub's
+# hosted runners; see full-build.yml for a self-hosted build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck libxml2-utils
+
+      - name: shellcheck
+        run: |
+          shellcheck --severity=warning setup.sh build.sh build-qemu-test/run-kernel-build.sh
+          shellcheck --severity=warning -s sh \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-session \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-wayland.sh \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart
+
+      - name: XML (labwc config, repo manifest)
+        run: |
+          xmllint --noout \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/rc.xml \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/menu.xml \
+            manifests/labwc-demo.xml
+
+      - name: JSON (waybar config)
+        run: |
+          python3 - <<'PY'
+          import json, re
+          p = "layers/meta-labwc-demo/recipes-graphics/labwc-session/files/waybar-config.jsonc"
+          json.loads(re.sub(r"^\s*//.*$", "", open(p).read(), flags=re.M))
+          print("waybar config OK")
+          PY
+
+      - name: Python
+        run: python3 -m py_compile build-qemu-test/qemu-boot-test.py
+
+  yocto:
+    needs: lint
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Yocto host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gawk wget git diffstat unzip texinfo gcc \
+            build-essential chrpath socat cpio python3 python3-pip python3-pexpect \
+            xz-utils debianutils iputils-ping python3-git python3-jinja2 \
+            python3-subunit zstd liblz4-tool lz4 file locales libacl1
+          sudo locale-gen en_US.UTF-8
+
+      - name: Install repo
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git config --global color.ui false
+
+      - name: Sync Toradex BSP 7.7.0 + meta-wayland
+        run: ./setup.sh
+
+      - name: Parse all recipes and resolve labwc-demo-image
+        env:
+          LANG: en_US.UTF-8
+        run: |
+          set -o pipefail
+          . ./export > /dev/null
+          bitbake -p 2>&1 | tail -5
+          bitbake -g labwc-demo-image 2>&1 | tail -5
+          for pn in labwc-demo-image labwc-session labwc wlroots-0.17 waybar foot \
+                    fuzzel swaybg seatd u-boot-env-mallow imx-gpu-viv linux-toradex; do
+            grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
+          done
+          if grep -q '^weston' pn-buildlist; then echo "weston must not be in the image"; exit 1; fi
+          echo "$(wc -l < pn-buildlist) recipes in the labwc-demo-image build"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: labwc-demo-image-buildlist
+          path: build/pn-buildlist

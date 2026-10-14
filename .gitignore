@@ -1,0 +1,37 @@
+# This directory is also a Google "repo" workspace (Toradex BSP + layers) and a
+# Yocto build area. Only our own files are tracked; everything else is
+# re-created by ./setup.sh and the build.
+
+# repo workspace and third-party layers (synced by ./setup.sh)
+/.repo/
+/export
+/repo-sync.log
+/layers/*
+!/layers/meta-labwc-demo/
+
+# Yocto build areas: keep only our configuration
+/build/*
+!/build/conf/
+/build/conf/*
+!/build/conf/local.conf
+!/build/conf/bblayers.conf
+!/build/conf/local.conf.toradex-orig
+!/build/conf/bblayers.conf.toradex-orig
+
+/build-qemu-test/*
+!/build-qemu-test/conf/
+/build-qemu-test/conf/*
+!/build-qemu-test/conf/local.conf
+!/build-qemu-test/conf/bblayers.conf
+!/build-qemu-test/qemu-boot-test.py
+!/build-qemu-test/run-kernel-build.sh
+
+# Shared caches and logs
+/downloads/
+/sstate-cache/
+/build-logs/
+
+# Local tooling
+/.vscode/
+__pycache__/
+*.pyc

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <!-- Third-party layer providing wlroots, labwc, waybar, foot, fuzzel, swaybg -->
+  <remote name="codeberg" fetch="https://codeberg.org"/>
+  <project name="flk/meta-wayland.git" path="layers/meta-wayland" remote="codeberg"
+           revision="25850e97205eaa1b54882197ceaa6814c0403b4a" upstream="scarthgap"/>
+</manifest>

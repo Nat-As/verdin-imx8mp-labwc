@@ -1,0 +1,31 @@
+name: full-build
+
+# Complete image build on a self-hosted runner (the hosted runners are too
+# small for a Yocto image). Register a runner with the labels
+# "self-hosted, linux, yocto" on a machine with >= 16 threads, 32 GB RAM and
+# ~100 GB free disk, then start this workflow manually from the Actions tab.
+# The Tezi tarball is uploaded as a workflow artifact.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: [self-hosted, linux, yocto]
+    timeout-minutes: 600
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Sync Toradex BSP 7.7.0 + meta-wayland
+        run: ./setup.sh
+
+      - name: Build labwc-demo-image
+        run: ./build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: labwc-demo-image-tezi
+          path: build/deploy/images/verdin-imx8mp/Verdin-iMX8MP_labwc-Demo-Image-Tezi_*.tar
+          retention-days: 14
