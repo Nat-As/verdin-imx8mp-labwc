@@ -73,6 +73,9 @@ TTYVTDisallocate=yes
 StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal
+# The PAM session moves the processes into the user's session, so filter the
+# compositor log by identifier: journalctl -b -t labwc
+SyslogIdentifier=labwc
 
 # Show up in 'w' and 'who'.
 UtmpIdentifier=tty7
