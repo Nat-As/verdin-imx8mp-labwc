@@ -22,6 +22,8 @@
   <item label="Terminal"><action name="Execute" command="foot" /></item>
   <item label="Applications…"><action name="Execute" command="fuzzel" /></item>
   <item label="System monitor (htop)"><action name="Execute" command="foot -T htop htop" /></item>
+  <item label="Network settings"><action name="Execute" command="foot -T &apos;Network settings&apos; nmtui" /></item>
+  <item label="Bluetooth manager"><action name="Execute" command="blueman-manager" /></item>
   <separator />
   <menu id="system-menu" />
 </menu>

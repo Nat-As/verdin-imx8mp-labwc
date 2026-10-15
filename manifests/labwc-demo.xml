@@ -4,4 +4,8 @@
   <remote name="codeberg" fetch="https://codeberg.org"/>
   <project name="flk/meta-wayland.git" path="layers/meta-wayland" remote="codeberg"
            revision="25850e97205eaa1b54882197ceaa6814c0403b4a" upstream="scarthgap"/>
+  <!-- Qt 6 (latest release branch compatible with scarthgap), incl. PyQt6 -->
+  <remote name="qt" fetch="https://code.qt.io"/>
+  <project name="yocto/meta-qt6.git" path="layers/meta-qt6" remote="qt"
+           revision="ec98b3ab1c8deeab9412ef6cbfd55729dc567b01" upstream="6.11"/>
 </manifest>

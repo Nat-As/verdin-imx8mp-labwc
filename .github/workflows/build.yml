@@ -75,7 +75,7 @@ jobs:
           git config --global user.email "github-actions@users.noreply.github.com"
           git config --global color.ui false
 
-      - name: Sync Toradex BSP 7.7.0 + meta-wayland
+      - name: Sync Toradex BSP 7.7.0 + meta-wayland + meta-qt6
         run: ./setup.sh
 
       - name: Parse all recipes and resolve labwc-demo-image
@@ -87,10 +87,15 @@ jobs:
           bitbake -p 2>&1 | tail -5
           bitbake -g labwc-demo-image 2>&1 | tail -5
           for pn in labwc-demo-image labwc-session labwc wlroots-0.17 waybar foot \
-                    fuzzel swaybg seatd u-boot-env-mallow imx-gpu-viv linux-toradex; do
+                    fuzzel swaybg seatd u-boot-env-mallow imx-gpu-viv linux-toradex \
+                    fish neofetch realtek-r8152 networkmanager blueman nmap nano \
+                    python3-scipy python3-pandas python3-matplotlib opencv \
+                    qtbase qtwayland python3-pyqt6; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
           done
-          if grep -q '^weston' pn-buildlist; then echo "weston must not be in the image"; exit 1; fi
+          for pn in weston connman; do
+            if grep -qx "$pn" pn-buildlist; then echo "$pn must not be in the image"; exit 1; fi
+          done
           echo "$(wc -l < pn-buildlist) recipes in the labwc-demo-image build"
 
       - uses: actions/upload-artifact@v7

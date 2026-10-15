@@ -35,3 +35,6 @@
 /.vscode/
 __pycache__/
 *.pyc
+
+# Locally staged release assets (published as GitHub release assets)
+/release/

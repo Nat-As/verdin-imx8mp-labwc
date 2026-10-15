@@ -12,7 +12,7 @@ window#waybar {
 }
 
 #custom-launcher, #custom-terminal, #custom-power,
-#clock, #cpu, #memory, #temperature, #network {
+#clock, #cpu, #memory, #temperature, #network, #bluetooth {
     padding: 0 10px;
 }
 
@@ -39,4 +39,12 @@ window#waybar {
 
 #temperature.critical {
     color: #e63946;
+}
+
+#bluetooth.connected {
+    color: #a8dadc;
+}
+
+#bluetooth.disabled, #bluetooth.off {
+    color: #6c7686;
 }

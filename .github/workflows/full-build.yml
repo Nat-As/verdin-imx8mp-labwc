@@ -18,7 +18,7 @@ jobs:
         with:
           clean: false
 
-      - name: Sync Toradex BSP 7.7.0 + meta-wayland
+      - name: Sync Toradex BSP 7.7.0 + meta-wayland + meta-qt6
         run: ./setup.sh
 
       - name: Build labwc-demo-image

@@ -21,7 +21,8 @@ SRC_URI = " \
     file://waybar-config.jsonc \
     file://waybar-style.css \
     file://glmark2.desktop \
-    file://wallpaper.png \
+    file://alakai-wallpaper.png \
+    file://labwc-demo.fish \
 "
 
 S = "${WORKDIR}"
@@ -33,7 +34,7 @@ REQUIRED_DISTRO_FEATURES = "wayland systemd pam"
 # The desktop user. Its password ("dev") is set by the image recipe.
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "-r render; -r input; -r wayland"
-USERADD_PARAM:${PN} = "--create-home --home-dir /home/dev --shell /bin/bash \
+USERADD_PARAM:${PN} = "--create-home --home-dir /home/dev --shell ${bindir}/fish \
     --user-group -G video,input,render,audio,wayland dev"
 
 SYSTEMD_SERVICE:${PN} = "labwc.service"
@@ -58,7 +59,8 @@ do_install() {
 
     install -Dm0644 ${WORKDIR}/glmark2.desktop ${D}${datadir}/applications/glmark2-es2-wayland.desktop
 
-    install -Dm0644 ${WORKDIR}/wallpaper.png ${D}${datadir}/backgrounds/labwc-demo/wallpaper.png
+    install -Dm0644 ${WORKDIR}/alakai-wallpaper.png ${D}${datadir}/backgrounds/labwc-demo/wallpaper.png
+    install -Dm0644 ${WORKDIR}/labwc-demo.fish ${D}${sysconfdir}/fish/conf.d/labwc-demo.fish
 }
 
 FILES:${PN} += " \
@@ -94,6 +96,7 @@ RDEPENDS:${PN} = " \
     xkeyboard-config \
     ncurses-terminfo-base \
     bash \
+    fish \
     sudo \
     htop \
     kbd \
@@ -105,4 +108,4 @@ RDEPENDS:${PN} = " \
 "
 
 # glmark2 desktop entry only makes sense with the GPU stack present
-RRECOMMENDS:${PN} = "glmark2 adwaita-icon-theme-cursors gdk-pixbuf-loader-png"
+RRECOMMENDS:${PN} = "glmark2 adwaita-icon-theme-cursors gdk-pixbuf-loader-png networkmanager-nmtui blueman"

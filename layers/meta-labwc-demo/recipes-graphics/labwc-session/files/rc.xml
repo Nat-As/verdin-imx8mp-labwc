@@ -54,6 +54,14 @@
     <default />
   </mouse>
 
+  <!--
+    Touchscreen of the Toradex Capacitive Touch Display 7" DSI. The panel is
+    driven through a DSI-to-LVDS bridge, so its output is LVDS-1. Touch input
+    is confined to that output, so it stays correct when HDMI is also
+    connected. If the output does not exist, touch spans all outputs.
+  -->
+  <touch deviceName="" mapToOutput="LVDS-1" />
+
   <!-- Enable tap-to-click on touchpads / touchscreens -->
   <libinput>
     <device category="default">

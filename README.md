@@ -7,38 +7,42 @@
 
 A Yocto image, built from source on the Toradex BSP 7.7.0, that boots a **Verdin iMX8M Plus** on
 the **Mallow** carrier board straight into a minimal **labwc** Wayland desktop. labwc runs directly
-on DRM/KMS, with no X11 or Xwayland.
+on DRM/KMS, with no X11 or Xwayland. The desktop shows on the
+**Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enabled) and on HDMI.
 
-| Role | Component |
+| | Included |
 |---|---|
-| Compositor | labwc 0.7.1 (wlroots 0.17.2) |
-| Panel | waybar |
-| Application launcher | fuzzel |
-| Terminal | foot |
-| Wallpaper | swaybg |
-| Fonts | DejaVu Sans/Mono/Serif, Font Awesome 6 |
+| Desktop | labwc 0.7.1 (wlroots 0.17.2), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
+| Shell | fish (default for the terminal, SSH and the console), bash |
+| Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
+| Tools | nano, neofetch, htop, tmux, git, curl, wget, rsync, nmap |
+| Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
+| Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV, Pillow, PyQt6, tkinter, pip, the full standard library |
+| Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
+| Drivers | All drivers of the Toradex kernel (Mallow peripherals, 7" DSI display, Wi-Fi/Bluetooth), Realtek r8152 USB Ethernet |
 
 ## Download and install
 
-**Pre-release v0.0.1:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.1.tar)** (148 MB)
+**Pre-release v0.0.2:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar)** (362 MB)
 
-SHA-256: `980b43770ffedb3bbc96fab23e21089ccd73a6583a9620bcb61ad354835cc2f3`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.1.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.0.1))
+SHA-256: `4cd72acaa7898beee3f35a6edc6aefd04f90159dcfa10ca3bf88c43dd683d1a4`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.0.2),
+[all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
 
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.1.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
 
-The board boots into the labwc desktop on the HDMI output. The Mallow device tree is selected
-automatically.
+The board boots into the labwc desktop on the 7" DSI display and the HDMI output. The Mallow device
+tree and the display overlays are selected automatically.
 
 <details>
 <summary>Installing over the network instead of a USB stick</summary>
@@ -54,13 +58,13 @@ automatically.
 
 Requirements: an Ubuntu 22.04 host with the
 [Yocto host packages](https://docs.yoctoproject.org/5.0/ref-manual/system-requirements.html#ubuntu-and-debian)
-and [`repo`](https://gerrit.googlesource.com/git-repo) installed, and about 100 GB of free disk. The first build
-takes about 1.5 hours on a 20-thread machine.
+and [`repo`](https://gerrit.googlesource.com/git-repo) installed, and about 150 GB of free disk. The first build
+takes several hours (it compiles the toolchain, Qt 6, OpenCV and SciPy from source).
 
 ```sh
 git clone https://github.com/Nat-As/verdin-imx8mp-labwc.git
 cd verdin-imx8mp-labwc
-./setup.sh      # fetch the Toradex BSP 7.7.0 and the meta-wayland layer
+./setup.sh      # fetch the Toradex BSP 7.7.0, meta-wayland and meta-qt6
 ./build.sh      # build labwc-demo-image (log: build-logs/latest.log)
 ```
 
@@ -70,8 +74,24 @@ The Tezi tarball is written to:
 build/deploy/images/verdin-imx8mp/Verdin-iMX8MP_labwc-Demo-Image-Tezi.tar
 ```
 
-To change the image, edit the layer in `layers/meta-labwc-demo` and the build configuration in
-`build/conf/local.conf`, then run `./build.sh` again. Rebuilds take a few minutes.
+### Customize the software
+
+The software in the image is listed in two config files. Edit them and run `./build.sh` again:
+
+| File | Contents |
+|---|---|
+| [`config/image-packages.conf`](config/image-packages.conf) | Applications, tools, networking, development tools, Qt, drivers, and packages to leave out |
+| [`config/python-packages.conf`](config/python-packages.conf) | Python libraries |
+
+Entries are Yocto package names, one per line. To find a package, search the
+[OpenEmbedded layer index](https://layers.openembedded.org/layerindex/branch/scarthgap/recipes/)
+(branch *scarthgap*). Packages are installed and configured when the image is built; there is no
+separate setup step on the board. Python libraries that aren't packaged can be installed on the
+board with `pip3 install --user <name>`.
+
+Other customizations are in the `layers/meta-labwc-demo` layer (desktop configuration, wallpaper,
+users) and in `build/conf/local.conf` (display overlays, build settings). Rebuilds after a change
+take a few minutes to an hour, depending on what changed.
 
 ## Screenshots
 
@@ -90,7 +110,10 @@ To change the image, edit the layer in `layers/meta-labwc-demo` and the build co
 | `dev` | `dev` | The desktop runs as this user. Can use `sudo`. |
 | `root` | *(empty)* | Serial console and SSH. |
 
-SSH is enabled. The board gets an address over DHCP on Ethernet:
+The login shell of both users is **fish**. Run `bash` for a POSIX shell, or change the default
+with `chsh -s /bin/bash`.
+
+SSH is enabled. The board gets an address over DHCP on Ethernet (or Wi-Fi, see below):
 
 ```sh
 ssh dev@<board-ip>
@@ -108,26 +131,41 @@ The hostname is `verdin-imx8mp-<serial-number>`, and mDNS is enabled, so
 |---|---|
 | Open the application launcher | **Apps** button on the panel, or **Super+D** |
 | Open a terminal | Terminal icon on the panel, or **Super+Return** |
-| Desktop menu (terminal, apps, htop, restart session, reboot, power off) | Right-click the desktop, or **Super+M** |
+| Network settings (Ethernet, Wi-Fi) | Click the network status on the panel (opens `nmtui`) |
+| Bluetooth devices | Click the Bluetooth icon on the panel (opens Blueman) |
+| Desktop menu (terminal, apps, htop, network, Bluetooth, restart session, reboot, power off) | Right-click the desktop, or **Super+M** |
 | Close a window | **Super+Q** or **Alt+F4** |
 | Switch windows | **Alt+Tab** |
 | Power off / reboot | Power icon on the panel (left click: power off, right click: reboot) |
 
-A keyboard and mouse (or touchscreen) can be plugged in at any time.
+The touchscreen is enabled (tap to select and click). A keyboard and mouse can be plugged in at any
+time.
 
 To start GUI programs over SSH, log in as `dev` while the desktop is running, then run them
 (for example `foot &`).
+
+### Python and Qt
+
+```sh
+python3 -c "import numpy, scipy, pandas, matplotlib, cv2; print(cv2.__version__)"
+```
+
+Plots from matplotlib and windows from PyQt6 or Qt 6 C++ programs open as Wayland windows on the
+desktop. tkinter is installed, but Tk is an X11 toolkit, so tkinter windows need an X server
+(Xwayland), which this image doesn't run.
 
 ### Configuration
 
 | What | Where |
 |---|---|
-| Keyboard shortcuts, window behaviour, menu, autostart | `/etc/xdg/labwc/` (per user: `~/.config/labwc/`) |
+| Keyboard shortcuts, window behaviour, menu, autostart, touchscreen | `/etc/xdg/labwc/` (per user: `~/.config/labwc/`) |
 | Panel | `/etc/xdg/waybar/` (per user: `~/.config/waybar/`) |
 | Terminal and launcher | `/etc/xdg/foot/foot.ini`, `/etc/xdg/fuzzel/fuzzel.ini` |
+| fish | `/etc/fish/` (per user: `~/.config/fish/`) |
 | Session settings (renderer, debug logging) | `/etc/default/labwc` |
+| Display overlays | `/boot/overlays.txt` (reboot after a change) |
 
-After a configuration change, select **Restart session** in the desktop menu, or run
+After a desktop configuration change, select **Restart session** in the desktop menu, or run
 `sudo systemctl restart labwc`.
 
 ### Troubleshooting
@@ -135,6 +173,12 @@ After a configuration change, select **Restart session** in the desktop menu, or
 - **Show the desktop log:** `journalctl -b -t labwc`
 - **Black or garbled screen:** switch to software rendering. Add `WLR_RENDERER=pixman` to
   `/etc/default/labwc`, then run `sudo systemctl restart labwc`.
+- **Touch input lands in the wrong place with HDMI also connected:** touch is mapped to the 7"
+  display (output `LVDS-1`). Check the output names with `wlr-randr` and adjust
+  `<touch mapToOutput="..."/>` in `/etc/xdg/labwc/rc.xml`.
+- **Using the Toradex DSI-to-HDMI adapter instead of the 7" display:** in `/boot/overlays.txt`, replace
+  `verdin-imx8mp_panel-cap-touch-7inch-dsi_overlay.dtbo` with
+  `verdin-imx8mp_dsi-to-hdmi_overlay.dtbo` and reboot.
 - **Return to the text console:** `sudo systemctl stop labwc`
 
 ## License

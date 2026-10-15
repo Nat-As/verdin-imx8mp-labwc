@@ -7,7 +7,7 @@
     "spacing": 6,
     "modules-left": ["custom/launcher", "wlr/taskbar"],
     "modules-center": ["clock"],
-    "modules-right": ["network", "cpu", "memory", "temperature", "custom/terminal", "custom/power"],
+    "modules-right": ["network", "bluetooth", "cpu", "memory", "temperature", "custom/terminal", "custom/power"],
 
     "custom/launcher": {
         "format": "  Apps",
@@ -52,6 +52,18 @@
         "format-ethernet": " {ipaddr}",
         "format-wifi": " {essid} {ipaddr}",
         "format-disconnected": "offline",
-        "tooltip-format": "{ifname}: {ipaddr}/{cidr} via {gwaddr}"
+        "tooltip-format": "{ifname}: {ipaddr}/{cidr} via {gwaddr}\nClick: network settings (nmtui)",
+        "on-click": "foot -T 'Network settings' nmtui"
+    },
+    "bluetooth": {
+        "format": "\uf293",
+        "format-disabled": "\uf294",
+        "format-off": "\uf294",
+        "format-connected": "\uf293 {device_alias}",
+        "format-no-controller": "",
+        "tooltip-format": "Bluetooth {status}\nClick: Bluetooth manager",
+        "tooltip-format-connected": "{device_enumerate}",
+        "tooltip-format-enumerate-connected": "{device_alias}",
+        "on-click": "blueman-manager"
     }
 }

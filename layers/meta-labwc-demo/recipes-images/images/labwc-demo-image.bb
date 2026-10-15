@@ -1,47 +1,98 @@
-# Toradex reference multimedia image with the Weston session replaced by a
-# minimal labwc Wayland desktop (waybar, fuzzel, foot, swaybg).
-require recipes-images/images/tdx-reference-multimedia-image.bb
+# Toradex reference image with a minimal labwc Wayland desktop (waybar,
+# fuzzel, foot, swaybg) instead of Weston.
+#
+# Based on tdx-reference-minimal-image plus the package groups of
+# tdx-reference-multimedia-image (that recipe itself is not used: it is tied to
+# Qt 5 / Weston, while this image uses Qt 6 from meta-qt6).
+#
+# Extra software is configured in config/image-packages.conf and
+# config/python-packages.conf (included from build/conf/local.conf).
+require recipes-images/images/tdx-reference-minimal-image.bb
 
 SUMMARY = "Toradex Embedded Linux labwc Demo Image"
-DESCRIPTION = "Reference multimedia image with a labwc Wayland desktop \
-(waybar, fuzzel, foot, swaybg) instead of Weston. Selects the Mallow \
-carrier board device tree on Verdin iMX8M Plus."
+DESCRIPTION = "Reference image with a labwc Wayland desktop (waybar, fuzzel, \
+foot, swaybg) instead of Weston, development tools, Python and Qt 6. \
+Selects the Mallow carrier board device tree on Verdin iMX8M Plus."
 
 # Prefix of the deployable tarball name
 export IMAGE_BASENAME = "labwc-Demo-Image"
 
-# --- Replace Weston with labwc ---------------------------------------------
-IMAGE_FEATURES:remove = "weston"
-APP_LAUNCH_WAYLAND = ""
+# Lists from config/*.conf (empty if those files are not included)
+LABWC_DEMO_PACKAGES ??= ""
+LABWC_DEMO_PYTHON_PACKAGES ??= ""
+LABWC_DEMO_IMAGE_FEATURES ??= ""
+LABWC_DEMO_EXCLUDE ??= ""
 
-# Drop Weston/X11 helpers and the Qt5 demo stack (Qt demos and their Weston
-# launchers are not part of a minimal labwc desktop) as well as gpicview,
-# which is a GTK2/X11 application and would need Xwayland.
-IMAGE_INSTALL:remove = " \
-    weston-xwayland \
-    xterm \
-    packagegroup-tdx-qt5 \
-    gpicview \
+# --- Content of tdx-reference-multimedia-image, without Weston and Qt 5 -------
+IMAGE_INSTALL += " \
+    ${@bb.utils.contains("MACHINE_FEATURES", "tpm2", "packagegroup-tpm2-tdx-cli", "", d)} \
+    packagegroup-tdx-cli \
+    packagegroup-tdx-graphical \
+    packagegroup-fsl-isp \
+    \
+    bash \
+    coreutils \
+    less \
+    makedevs \
+    mime-support \
+    net-tools \
+    util-linux \
+    v4l-utils \
+    media-files \
 "
 
+# --- labwc desktop ------------------------------------------------------------
 IMAGE_INSTALL += " \
     labwc-session \
     wlr-randr \
     wl-clipboard \
 "
 
-# SSH server: Toradex images already ship dropbear (packagegroup-basic); make
-# it explicit. debug-tweaks (local.conf) allows root login with an empty
-# password; the "dev" user has password "dev". See README.md.
+# --- Configured software (config/*.conf) ----------------------------------------
+IMAGE_INSTALL += "${LABWC_DEMO_PACKAGES} ${LABWC_DEMO_PYTHON_PACKAGES}"
+IMAGE_FEATURES += "${LABWC_DEMO_IMAGE_FEATURES}"
+BAD_RECOMMENDATIONS += "${LABWC_DEMO_EXCLUDE}"
+
+# NetworkManager (config/image-packages.conf) replaces Toradex's connman
+CONMANPKGS = ""
+
+# NetworkManager manages all interfaces: mask systemd-networkd (whose default
+# 80-wired.network would also run DHCP on Ethernet) and the system-wide
+# dnsmasq service (NetworkManager runs its own dnsmasq for shared connections).
+LABWC_DEMO_DISABLED_SERVICES ?= " \
+    systemd-networkd.service \
+    systemd-networkd.socket \
+    systemd-networkd-wait-online.service \
+    dnsmasq.service \
+"
+
+disable_conflicting_services () {
+    if [ -e ${IMAGE_ROOTFS}${sbindir}/NetworkManager ]; then
+        for s in ${LABWC_DEMO_DISABLED_SERVICES}; do
+            if [ -e ${IMAGE_ROOTFS}${systemd_system_unitdir}/$s ]; then
+                systemctl --root=${IMAGE_ROOTFS} mask $s
+            fi
+        done
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "disable_conflicting_services;"
+
+# SSH server: Toradex images ship dropbear (packagegroup-basic); make it
+# explicit. debug-tweaks (local.conf) allows root login with an empty
+# password; the "dev" user has password "dev".
 IMAGE_FEATURES += "ssh-server-dropbear"
 
 # Boot into the graphical target so labwc.service starts
 SYSTEMD_DEFAULT_TARGET = "graphical.target"
 
-# --- Development login --------------------------------------------------------
+# --- Logins -------------------------------------------------------------------
 # User "dev" is created by labwc-session; set its password to "dev".
 # Hash generated with: openssl passwd -6 -salt labwcdemo dev
 LABWC_DEMO_DEV_PASSWORD_HASH = "$6$labwcdemo$NCE3oMD5Q7/pCJv69NBtd38SRDxNB3gQZ4ALLLNQqM2fHlpe7ERLLog/i6UvbKuj4nr0PnkJc8sw4q8PL8sfw0"
+
+# Login shell for root ("dev" gets it from labwc-session). Used by dropbear
+# (SSH) and the serial console. Must be listed in /etc/shells.
+LABWC_DEMO_ROOT_SHELL ?= "${bindir}/fish"
 
 python set_dev_password () {
     shadow = os.path.join(d.getVar('IMAGE_ROOTFS'), 'etc', 'shadow')
@@ -60,7 +111,30 @@ python set_dev_password () {
     with open(shadow, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 }
-ROOTFS_POSTPROCESS_COMMAND += "set_dev_password;"
+
+python set_root_shell () {
+    rootfs = d.getVar('IMAGE_ROOTFS')
+    shell = d.getVar('LABWC_DEMO_ROOT_SHELL')
+    if not shell:
+        return
+    if not os.path.exists(rootfs + shell):
+        bb.fatal("LABWC_DEMO_ROOT_SHELL %s is not installed in the image" % shell)
+    with open(os.path.join(rootfs, 'etc', 'shells')) as f:
+        if shell not in f.read().split():
+            bb.fatal("%s is not listed in /etc/shells" % shell)
+    passwd = os.path.join(rootfs, 'etc', 'passwd')
+    with open(passwd) as f:
+        lines = f.read().splitlines()
+    for i, line in enumerate(lines):
+        fields = line.split(':')
+        if fields[0] == 'root':
+            fields[6] = shell
+            lines[i] = ':'.join(fields)
+    with open(passwd, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+}
+
+ROOTFS_POSTPROCESS_COMMAND += "set_dev_password; set_root_shell;"
 
 # --- Toradex Easy Installer: select the Mallow carrier board -----------------
 # Tezi writes this U-Boot environment to the module. It is the default
