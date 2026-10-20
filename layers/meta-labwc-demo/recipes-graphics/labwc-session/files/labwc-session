@@ -1,20 +1,41 @@
 #!/bin/sh
 # labwc session launcher used by labwc.service.
 #
-# Renderer selection:
-#  - If WLR_RENDERER is set (e.g. in /etc/default/labwc), it is used as is.
-#  - Otherwise labwc starts with wlroots' automatic selection, which tries the
-#    hardware GLES2 renderer (Vivante/imx-gpu-viv) first. If labwc exits with
-#    an error within LABWC_FALLBACK_WINDOW seconds, it is restarted with the
-#    pixman software renderer so the board still comes up with a desktop.
+# Renderer selection
+# ------------------
+# labwc (wlroots) is started with the renderer strategies listed in
+# LABWC_RENDERERS (/etc/default/labwc), in order, until one works:
 #
-# The renderer actually in use is recorded in $XDG_RUNTIME_DIR/labwc-renderer.
+#   vulkan        Vulkan renderer (Vivante VSI Vulkan 1.3, libvulkan_VSI)
+#   gles2         GLES2 renderer on the display device (EGL GBM platform on
+#                 the imx-drm KMS node, like Weston; WLR_EGL_SKIP_DEVICE=1)
+#   gles2-render  GLES2 renderer on the GPU render node (/dev/dri/renderD*)
+#   gles2-device  GLES2 with wlroots' EGL device lookup (crashed in v0.0.3;
+#                 only for diagnosis)
+#   pixman        CPU software rendering (always works, slow)
+#
+# A strategy fails if labwc exits with an error, or logs renderer errors,
+# within LABWC_FALLBACK_WINDOW seconds, or if it does not answer Wayland
+# clients within LABWC_START_TIMEOUT seconds (a hanging GPU driver). A strategy that crashes labwc (signal)
+# later is skipped until the next reboot as well. Setting WLR_RENDERER skips
+# this and uses that renderer only.
+#
+# The strategy in use is written to /tmp/labwc-session-<uid>/renderer
+# (shown by labwc-hwaccel-check); every attempt is logged to the journal
+# (journalctl -b -t labwc).
 
+LABWC_RENDERERS=${LABWC_RENDERERS:-"vulkan gles2 gles2-render pixman"}
 LABWC_FALLBACK_WINDOW=${LABWC_FALLBACK_WINDOW:-20}
+LABWC_START_TIMEOUT=${LABWC_START_TIMEOUT:-45}
+# Renderer error lines within the window that make a strategy fail
+LABWC_RENDER_ERROR_LIMIT=${LABWC_RENDER_ERROR_LIMIT:-5}
 # Extra labwc arguments. Default -V (info level) so the journal shows which
-# renderer wlroots picked ("Creating GLES2 renderer" / "Creating pixman
-# renderer"); use -d for full debug output.
+# renderer wlroots created; use -d for full debug output.
 LABWC_ARGS=${LABWC_ARGS--V}
+
+RENDER_ERROR_RE='VK_ERROR|Failed to render|Failed to import|Failed to allocate|Failed to create (a )?(texture|render buffer|swapchain|allocator)|gbm_bo_create failed|EGL_BAD_|GL_INVALID_|GL_OUT_OF_MEMORY|Failed to (begin|submit|end) .*(render|command)'
+
+log() { echo "labwc-session: $*"; }
 
 # The image ships the en_US locale only (IMAGE_LINGUAS = "en-us"); C.UTF-8 is
 # not installed, and foot refuses to start without a UTF-8 locale.
@@ -27,7 +48,7 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
     if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
         export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
     elif command -v dbus-run-session >/dev/null 2>&1; then
-        echo "labwc-session: no user D-Bus found, starting one with dbus-run-session"
+        log "no user D-Bus found, starting one with dbus-run-session"
         exec dbus-run-session -- "$0" "$@"
     fi
 fi
@@ -42,26 +63,177 @@ export GDK_BACKEND=${GDK_BACKEND:-wayland}
 export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland}
 export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-wayland}
 
-state="${XDG_RUNTIME_DIR:-/tmp}/labwc-renderer"
+# State that survives session restarts but not reboots (/tmp is a tmpfs)
+STATE_DIR=/tmp/labwc-session-$(id -u)
+mkdir -p "$STATE_DIR" && chmod 0755 "$STATE_DIR"
+failed_file="$STATE_DIR/failed"
+touch "$failed_file"
+
+# First DRM render node (/dev/dri/renderD128: the Vivante GPU; the i.MX8MP
+# display controller has none)
+render_node() {
+    for n in /sys/class/drm/renderD*; do
+        [ -e "$n" ] && { echo "/dev/dri/${n##*/}"; return 0; }
+    done
+    return 1
+}
+
+# DRM card with display connectors (imx-drm; the Vivante card0 has none)
+kms_card() {
+    for c in /sys/class/drm/card[0-9]*; do
+        case ${c##*/} in *-*) continue ;; esac
+        for conn in "$c"-*; do
+            [ -e "$conn" ] && { echo "/dev/dri/${c##*/}"; return 0; }
+        done
+    done
+    return 1
+}
+
+# Use only the display controller as wlroots DRM backend device
+if [ -z "$WLR_DRM_DEVICES" ] && card=$(kms_card); then
+    export WLR_DRM_DEVICES=$card
+    log "display device: $card"
+fi
+
+# Print the environment assignments for a strategy, or fail if unknown
+strategy_env() {
+    case $1 in
+    vulkan)       echo "WLR_RENDERER=vulkan" ;;
+    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1" ;;
+    gles2-render)
+        node=$(render_node) || return 1
+        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1 WLR_RENDER_DRM_DEVICE=$node" ;;
+    gles2-device) echo "WLR_RENDERER=gles2" ;;
+    pixman)       echo "WLR_RENDERER=pixman" ;;
+    *)            return 1 ;;
+    esac
+}
+
+# Copy labwc's output to the journal. During the first $LABWC_FALLBACK_WINDOW
+# seconds, count renderer errors and stop labwc (pid $1) if there are too many.
+watch_output() {
+    pid=$1 marker=$2 start=$(date +%s) errors=0
+    while IFS= read -r line; do
+        printf '%s\n' "$line"
+        if printf '%s\n' "$line" | grep -Eq "$RENDER_ERROR_RE"; then
+            errors=$((errors + 1))
+            if [ "$errors" -ge "$LABWC_RENDER_ERROR_LIMIT" ]; then
+                log "$errors renderer errors, stopping labwc"
+                echo "renderer errors" > "$marker"
+                kill "$pid" 2>/dev/null
+            fi
+        fi
+        [ $(( $(date +%s) - start )) -ge "$LABWC_FALLBACK_WINDOW" ] && break
+    done
+    exec cat
+}
+
+# Wait until labwc (pid $1) answers Wayland clients. Stop it if it does not
+# within $LABWC_START_TIMEOUT seconds, e.g. because a GPU driver hangs.
+watch_startup() {
+    pid=$1 marker=$2 t=0
+    while [ "$t" -lt "$LABWC_START_TIMEOUT" ]; do
+        kill -0 "$pid" 2>/dev/null || return 0
+        for sock in "${XDG_RUNTIME_DIR:-/tmp}"/wayland-*; do
+            case $sock in *.lock) continue ;; esac
+            [ -S "$sock" ] || continue
+            if WAYLAND_DISPLAY=${sock##*/} timeout 5 wlr-randr >/dev/null 2>&1; then
+                log "labwc is up after ${t}s"
+                return 0
+            fi
+        done
+        sleep 1
+        t=$((t + 1))
+    done
+    log "labwc did not start within ${LABWC_START_TIMEOUT}s, stopping it"
+    echo "no response from labwc" > "$marker"
+    kill "$pid" 2>/dev/null
+    sleep 3
+    kill -9 "$pid" 2>/dev/null
+}
+
+# Run labwc with a strategy. Returns 0 if labwc ended normally, 1 if the
+# strategy failed (and labwc should be tried with the next one), 2 if labwc
+# failed after it had been running for a while.
+run_strategy() {
+    name=$1 envs=$2
+    shift 2
+    fifo="$STATE_DIR/output.$$" marker="$STATE_DIR/marker.$$"
+    rm -f "$fifo" "$marker"
+    mkfifo "$fifo" || return 1
+
+    log "starting labwc with renderer strategy '$name' ($envs)"
+    echo "$name" > "$STATE_DIR/renderer"
+    start=$(date +%s)
+    # shellcheck disable=SC2086
+    env $envs labwc $LABWC_ARGS "$@" > "$fifo" 2>&1 &
+    pid=$!
+    watch_output "$pid" "$marker" < "$fifo" &
+    watcher=$!
+    watch_startup "$pid" "$marker" &
+    starter=$!
+    # Stop labwc when systemd stops the session
+    trap 'kill $pid 2>/dev/null' TERM INT HUP
+    wait "$pid"
+    rc=$?
+    # wait returns early when a trapped signal arrives
+    while kill -0 "$pid" 2>/dev/null; do wait "$pid"; rc=$?; done
+    trap - TERM INT HUP
+    elapsed=$(( $(date +%s) - start ))
+    sleep 0.2
+    kill "$watcher" "$starter" 2>/dev/null
+    rm -f "$fifo"
+
+    if [ -e "$marker" ]; then
+        log "strategy '$name' failed: $(cat "$marker") within ${elapsed}s"
+        rm -f "$marker"
+        return 1
+    fi
+    if [ "$rc" -eq 0 ]; then
+        log "labwc exited normally after ${elapsed}s"
+        return 0
+    fi
+    if [ "$rc" -gt 128 ]; then
+        reason="killed by signal $((rc - 128))"
+    else
+        reason="exit code $rc"
+    fi
+    if [ "$elapsed" -lt "$LABWC_FALLBACK_WINDOW" ]; then
+        log "strategy '$name' failed: labwc $reason after ${elapsed}s"
+        return 1
+    fi
+    log "labwc $reason after ${elapsed}s with strategy '$name'"
+    # A crash after startup: don't use this strategy again until reboot
+    [ "$rc" -gt 128 ] && return 3
+    return 2
+}
 
 if [ -n "$WLR_RENDERER" ]; then
-    echo "labwc-session: using WLR_RENDERER=$WLR_RENDERER (forced)"
-    echo "$WLR_RENDERER (forced)" > "$state"
+    log "using WLR_RENDERER=$WLR_RENDERER (forced in /etc/default/labwc)"
+    echo "$WLR_RENDERER (forced)" > "$STATE_DIR/renderer"
     exec labwc $LABWC_ARGS "$@"
 fi
 
-echo "labwc-session: trying hardware rendering (wlroots auto: gles2, then pixman)"
-echo "auto" > "$state"
-start=$(date +%s)
-labwc $LABWC_ARGS "$@"
-rc=$?
-elapsed=$(( $(date +%s) - start ))
+for s in $LABWC_RENDERERS; do
+    if grep -qx "$s" "$failed_file"; then
+        log "skipping strategy '$s' (failed earlier in this boot)"
+        continue
+    fi
+    if ! envs=$(strategy_env "$s"); then
+        log "skipping unknown or unavailable strategy '$s'"
+        continue
+    fi
+    run_strategy "$s" "$envs" "$@"
+    rc=$?
+    case $rc in
+    0) exit 0 ;;
+    2) exit 1 ;;
+    esac
+    [ "$s" != pixman ] && echo "$s" >> "$failed_file"
+    # Crash after startup: systemd restarts the service, which then skips it
+    [ "$rc" -eq 3 ] && exit 1
+done
 
-if [ "$rc" -ne 0 ] && [ "$elapsed" -lt "$LABWC_FALLBACK_WINDOW" ]; then
-    echo "labwc-session: labwc exited with $rc after ${elapsed}s, falling back to WLR_RENDERER=pixman"
-    echo "pixman (fallback)" > "$state"
-    export WLR_RENDERER=pixman
-    exec labwc $LABWC_ARGS "$@"
-fi
-
-exit "$rc"
+log "all renderer strategies failed, using pixman"
+echo "pixman (last resort)" > "$STATE_DIR/renderer"
+exec env WLR_RENDERER=pixman labwc $LABWC_ARGS "$@"

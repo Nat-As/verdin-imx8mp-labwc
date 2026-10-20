@@ -1,9 +1,26 @@
 # Environment for labwc.service (read by systemd, then by labwc-session).
+# Apply changes with: sudo systemctl restart labwc
 #
-# Renderer: leave unset to try the hardware GLES2 renderer first, with an
-# automatic fallback to software rendering. Force one with:
+# Renderer: labwc-session tries these GPU renderer strategies in order and
+# falls back to the next one if labwc crashes or logs renderer errors during
+# startup (see /usr/bin/labwc-session):
+#   vulkan        Vulkan renderer on the Vivante GPU
+#   gles2         OpenGL ES 2 renderer on the display device (as Weston does)
+#   gles2-render  OpenGL ES 2 renderer on the GPU render node
+#   pixman        software rendering on the CPU (slow, always works)
+# Check which one is in use with labwc-hwaccel-check. To prefer GLES2 over
+# Vulkan (for example if windows look wrong with Vulkan):
+#LABWC_RENDERERS="gles2 gles2-render vulkan pixman"
+#
+# Or force a single wlroots renderer (no fallback): gles2, vulkan or pixman.
 #WLR_RENDERER=pixman
-#WLR_RENDERER=gles2
+#
+# Seconds after startup during which a failure moves on to the next strategy
+#LABWC_FALLBACK_WINDOW=20
+#
+# Seconds labwc may take to start answering clients before the next strategy
+# is tried (protects against a GPU driver that hangs)
+#LABWC_START_TIMEOUT=45
 
 # Seat backend (set by labwc.service): seatd. logind needs polkit, which
 # this image does not ship.
@@ -12,8 +29,8 @@
 # Uncomment if the cursor is invisible or corrupted on your display.
 #WLR_NO_HARDWARE_CURSORS=1
 
-# Restrict wlroots to a specific DRM device, e.g. if more than one exists.
-#WLR_DRM_DEVICES=/dev/dri/card0
+# DRM display device (default: detected, the card with display connectors)
+#WLR_DRM_DEVICES=/dev/dri/card1
 
 # Session locale (default en_US.UTF-8, the only locale in the image)
 #LANG=en_US.UTF-8

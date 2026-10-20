@@ -28,7 +28,11 @@ jobs:
           shellcheck --severity=warning -s sh \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-session \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-wayland.sh \
-            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-demo-outputs
+          shellcheck --severity=warning -s bash \
+            layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-gpu-probe \
+            layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-hwaccel-check
 
       - name: XML (labwc config, repo manifest)
         run: |
@@ -75,7 +79,7 @@ jobs:
           git config --global user.email "github-actions@users.noreply.github.com"
           git config --global color.ui false
 
-      - name: Sync Toradex BSP 7.7.0 + meta-wayland + meta-qt6
+      - name: Sync Toradex BSP 7.7.0 + meta-wayland + meta-qt6 + meta-imx-ml
         run: ./setup.sh
 
       - name: Parse all recipes and resolve labwc-demo-image
@@ -91,12 +95,18 @@ jobs:
                     fish neofetch realtek-r8152 networkmanager blueman nmap nano \
                     tree man-db man-pages gzip git labwc-demo-admin \
                     python3-scipy python3-pandas python3-matplotlib opencv \
-                    qtbase qtwayland python3-pyqt6; do
+                    qtbase qtwayland python3-pyqt6 labwc-demo-gpu-tools clinfo \
+                    rapidopenvx tim-vx tensorflow-lite tensorflow-lite-vx-delegate; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
           done
           for pn in weston connman; do
             if grep -qx "$pn" pn-buildlist; then echo "$pn must not be in the image"; exit 1; fi
           done
+          # GPU renderers and OpenCL in the build configuration
+          bitbake -e wlroots-0.17 | grep -E '^EXTRA_OEMESON=.*-Drenderers=gles2,vulkan' > /dev/null \
+            || { echo "wlroots is not built with the gles2 and vulkan renderers"; exit 1; }
+          bitbake -e opencv | grep -E '^PACKAGECONFIG=.*\bopencl\b' > /dev/null \
+            || { echo "opencv is not built with OpenCL"; exit 1; }
           echo "$(wc -l < pn-buildlist) recipes in the labwc-demo-image build"
 
       - uses: actions/upload-artifact@v7

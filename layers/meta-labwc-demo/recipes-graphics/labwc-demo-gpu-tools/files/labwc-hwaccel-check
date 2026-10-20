@@ -1,0 +1,241 @@
+#!/bin/bash
+# labwc-hwaccel-check: check the GPU, NPU, VPU and board hardware support of
+# the image and print one PASS/WARN/FAIL line per item.
+#
+#   sudo labwc-hwaccel-check          all checks (some need root)
+#   sudo labwc-hwaccel-check -q       skip the NPU/GPU compute benchmarks
+#
+# Exit status: number of FAILed checks (0 = all passed).
+set -u
+
+QUICK=0
+[ "${1:-}" = "-q" ] && QUICK=1
+
+pass=0 warn=0 fail=0
+PASS() { printf '[PASS] %-14s %s\n' "$1" "$2"; pass=$((pass + 1)); }
+WARN() { printf '[WARN] %-14s %s\n' "$1" "$2"; warn=$((warn + 1)); }
+FAIL() { printf '[FAIL] %-14s %s\n' "$1" "$2"; fail=$((fail + 1)); }
+INFO() { printf '[INFO] %-14s %s\n' "$1" "$2"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ "$(id -u)" -eq 0 ] || INFO "user" "not root: some checks are limited (run with sudo)"
+
+TFLITE_DIR=$(ls -d /usr/bin/tensorflow-lite-*/examples 2>/dev/null | head -n1)
+VX_DELEGATE=/usr/lib/libvx_delegate.so
+
+# --- GPU driver ---------------------------------------------------------------
+if [ -d /sys/module/galcore ]; then
+    PASS "gpu-driver" "galcore $(cat /sys/module/galcore/version 2>/dev/null || dmesg 2>/dev/null | grep -m1 -o 'Galcore version.*' | cut -d' ' -f3)"
+else
+    FAIL "gpu-driver" "galcore kernel module not loaded (modprobe galcore)"
+fi
+[ -c /dev/galcore ] && PASS "gpu-device" "/dev/galcore ($(stat -c '%G %a' /dev/galcore))" \
+    || FAIL "gpu-device" "/dev/galcore missing"
+
+# --- DRM devices --------------------------------------------------------------
+for c in /sys/class/drm/card[0-9]* /sys/class/drm/renderD*; do
+    [ -e "$c" ] || continue
+    case ${c##*/} in card*-*) continue ;; esac
+    drv=$(basename "$(readlink -f "$c/device/driver" 2>/dev/null)" 2>/dev/null)
+    conns=$(for x in "$c"-*; do [ -e "$x" ] && printf '%s=%s ' "${x##*/${c##*/}-}" "$(cat "$x/status")"; done)
+    INFO "drm" "/dev/dri/${c##*/}: ${drv:-?} ${conns}"
+done
+ls /dev/dri/renderD* >/dev/null 2>&1 && PASS "render-node" "$(ls /dev/dri/renderD* | tr '\n' ' ')" \
+    || FAIL "render-node" "no DRM render node (/dev/dri/renderD*)"
+
+# --- Compositor renderer --------------------------------------------------------
+state=$(cat /tmp/labwc-session-*/renderer 2>/dev/null | head -n1)
+created=$(journalctl -b -t labwc -o cat 2>/dev/null | grep -oE "Creating (GLES2|Vulkan|pixman) renderer" | tail -n1)
+if ! systemctl is-active -q labwc.service; then
+    WARN "renderer" "labwc.service is not running"
+elif [ -z "$state" ]; then
+    WARN "renderer" "unknown (no labwc-session state in /tmp)"
+elif echo "$state" | grep -q pixman; then
+    failed=$(cat /tmp/labwc-session-*/failed 2>/dev/null | tr '\n' ' ')
+    WARN "renderer" "labwc uses software rendering (pixman: $state)${failed:+; failed strategies: $failed}"
+else
+    PASS "renderer" "labwc uses the GPU: strategy '$state'${created:+ ($created)}"
+fi
+failed=$(cat /tmp/labwc-session-*/failed 2>/dev/null | tr '\n' ' ')
+[ -n "$failed" ] && ! echo "$state" | grep -q pixman && INFO "renderer" "strategies that failed this boot: $failed"
+
+# --- Vulkan -------------------------------------------------------------------
+if have vulkaninfo; then
+    vk=$(timeout 20 vulkaninfo --summary 2>/dev/null)
+    dev=$(echo "$vk" | grep -m1 "deviceName" | cut -d= -f2- | sed 's/^ *//')
+    api=$(echo "$vk" | grep -m1 "apiVersion" | cut -d= -f2- | sed 's/^ *//')
+    if [ -n "$dev" ]; then PASS "vulkan" "$dev, API $api"
+    else FAIL "vulkan" "no Vulkan device (vulkaninfo --summary)"; fi
+else
+    WARN "vulkan" "vulkaninfo not installed"
+fi
+
+# --- OpenCL -------------------------------------------------------------------
+if have clinfo; then
+    cl=$(timeout 20 clinfo 2>/dev/null)
+    plat=$(echo "$cl" | grep -m1 "Platform Name" | sed 's/.*Platform Name *//')
+    dev=$(echo "$cl" | grep -m1 "Device Name" | sed 's/.*Device Name *//')
+    ver=$(echo "$cl" | grep -m1 "Device Version" | sed 's/.*Device Version *//')
+    if [ -n "$dev" ]; then PASS "opencl" "$plat: $dev ($ver)"
+    else FAIL "opencl" "no OpenCL device (clinfo)"; fi
+else
+    WARN "opencl" "clinfo not installed"
+fi
+
+# --- OpenCV with OpenCL -----------------------------------------------------------
+if have python3; then
+    ocv_ver=$(timeout 60 python3 -c "import cv2; print(cv2.__version__)" 2>/dev/null)
+    ocv_built=$(timeout 60 python3 -c "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'OpenCL:' in l][0].split(':', 1)[1].strip())" 2>/dev/null)
+    ocv=$(timeout 60 python3 - 2>/dev/null <<'EOF'
+import cv2
+ok = cv2.ocl.haveOpenCL()
+dev = cv2.ocl.Device.getDefault().name() if ok else ""
+print("%s|%s" % (ok, dev))
+EOF
+)
+    IFS='|' read -r ocv_ok ocv_dev <<< "$ocv"
+    if [ -z "$ocv_ver" ]; then FAIL "opencv-ocl" "python3 -c 'import cv2' failed"
+    elif [ "$ocv_ok" = True ]; then PASS "opencv-ocl" "OpenCV $ocv_ver, OpenCL device: $ocv_dev"
+    elif [ -z "$ocv" ]; then FAIL "opencv-ocl" "OpenCV $ocv_ver (OpenCL build: $ocv_built): the OpenCL query crashed"
+    else FAIL "opencv-ocl" "OpenCV $ocv_ver (OpenCL build: $ocv_built): no OpenCL device"; fi
+fi
+
+# --- OpenVX / NPU -----------------------------------------------------------------
+if [ -e /usr/lib/libOpenVX.so.1 ] || [ -e /usr/lib/libOpenVX.so ]; then
+    ovx=$(timeout 30 python3 - 2>/dev/null <<'EOF'
+import ctypes
+vx = ctypes.CDLL("libOpenVX.so.1")
+vx.vxCreateContext.restype = ctypes.c_void_p
+ctx = vx.vxCreateContext()
+st = vx.vxGetStatus(ctypes.c_void_p(ctx))
+print("ok" if ctx and st == 0 else "status %d" % st)
+if ctx:
+    vx.vxReleaseContext(ctypes.byref(ctypes.c_void_p(ctx)))
+EOF
+)
+    [ "$ovx" = ok ] && PASS "openvx" "vxCreateContext() works (libOpenVX)" \
+        || FAIL "openvx" "vxCreateContext() failed: ${ovx:-crashed}"
+else
+    FAIL "openvx" "libOpenVX not installed"
+fi
+ls /usr/lib/libNNArchPerf.so* /usr/lib/libNNGPUBinary* /usr/lib/libNNVXCBinary* >/dev/null 2>&1 \
+    && PASS "nn-driver" "libnn-imx (NPU kernels) installed" || WARN "nn-driver" "libnn-imx not installed"
+[ -e /usr/lib/libtim-vx.so ] && PASS "tim-vx" "TIM-VX installed" || FAIL "tim-vx" "libtim-vx.so not installed"
+
+if [ -n "$TFLITE_DIR" ] && [ -e "$VX_DELEGATE" ]; then
+    if [ "$QUICK" = 1 ]; then
+        INFO "npu-tflite" "skipped (-q)"
+    else
+        cd "$TFLITE_DIR" || exit 1
+        model=$(ls mobilenet_*quant*.tflite 2>/dev/null | head -n1)
+        li() { timeout 300 ./label_image -m "$model" -i grace_hopper.bmp -l labels.txt "$@" 2>&1; }
+        cpu=$(li -c 5)
+        npu=$(li -c 5 --external_delegate_path="$VX_DELEGATE")
+        cpu_t=$(echo "$cpu" | grep -m1 -oE "average time: [0-9.]+ ms" | grep -oE "[0-9.]+")
+        npu_t=$(echo "$npu" | grep -m1 -oE "average time: [0-9.]+ ms" | grep -oE "[0-9.]+")
+        top=$(echo "$npu" | grep -m1 -E "^(INFO: )?[0-9.]+: [0-9]+ " | sed -E 's/^(INFO: )?[0-9.]+: [0-9]+ //')
+        if [ -n "$npu_t" ] && echo "$npu" | grep -q "Applied EXTERNAL delegate"; then
+            PASS "npu-tflite" "MobileNet v1 on the NPU: ${npu_t} ms (CPU: ${cpu_t:-?} ms), top-1: ${top:-?}"
+        elif [ -n "$npu_t" ]; then
+            WARN "npu-tflite" "ran ${npu_t} ms, but the VX delegate was not reported as applied"
+        else
+            FAIL "npu-tflite" "label_image with the VX delegate failed: $(echo "$npu" | grep -iE "error|fail" | head -n2 | tr '\n' ' ')"
+        fi
+        cd - >/dev/null || true
+    fi
+else
+    FAIL "npu-tflite" "TensorFlow Lite examples or $VX_DELEGATE not installed"
+fi
+
+# --- G2D (2D GPU) ---------------------------------------------------------------
+if ls /usr/lib/libg2d.so* >/dev/null 2>&1; then
+    g2d=$(timeout 20 python3 - 2>/dev/null <<'EOF'
+import ctypes, glob
+lib = ctypes.CDLL(sorted(glob.glob("/usr/lib/libg2d.so*"))[0])
+h = ctypes.c_void_p()
+r = lib.g2d_open(ctypes.byref(h))
+print("ok" if r == 0 and h.value else "g2d_open returned %d" % r)
+if r == 0:
+    lib.g2d_close(h)
+EOF
+)
+    [ "$g2d" = ok ] && PASS "g2d" "g2d_open() works" || FAIL "g2d" "g2d_open() failed: ${g2d:-crashed}"
+else
+    FAIL "g2d" "libg2d not installed"
+fi
+
+# --- VPU (video codecs) ---------------------------------------------------------
+vpu=$(ls /dev/mxc_hantro* 2>/dev/null | tr '\n' ' ')
+[ -n "$vpu" ] && PASS "vpu" "Hantro VPU: $vpu" || FAIL "vpu" "no /dev/mxc_hantro* device"
+if have gst-inspect-1.0; then
+    els=$(for e in vpudec vpuenc_h264 vpuenc_hevc v4l2h264dec; do gst-inspect-1.0 "$e" >/dev/null 2>&1 && printf '%s ' "$e"; done)
+    [ -n "$els" ] && PASS "vpu-gst" "GStreamer elements: $els" || WARN "vpu-gst" "no VPU GStreamer elements"
+fi
+
+# --- ISP (camera) -----------------------------------------------------------------
+ls /dev/video* >/dev/null 2>&1 && INFO "video" "$(for v in /dev/video*; do printf '%s(%s) ' "${v##*/}" "$(cat /sys/class/video4linux/${v##*/}/name 2>/dev/null)"; done)"
+
+# --- Displays and touch ---------------------------------------------------------
+for x in /sys/class/drm/card*-*; do
+    [ -e "$x/status" ] || continue
+    n=${x##*/}; n=${n#card*-}
+    st=$(cat "$x/status") en=$(cat "$x/enabled" 2>/dev/null)
+    mode=$(head -n1 "$x/modes" 2>/dev/null)
+    INFO "display" "$n: $st, $en${mode:+, $mode}"
+done
+if [ -e /sys/bus/i2c/devices/1-0041 ]; then
+    if [ -e /sys/bus/i2c/devices/1-0041/driver ]; then
+        PASS "touch" "7\" display touch controller (ILI2132) on I2C 1-0041"
+    else
+        FAIL "touch" "7\" display not detected: no answer from its touch controller (I2C 1-0041) and LVDS bridge (1-002c). Check the display cable and power; the panel output is turned off"
+    fi
+fi
+ls /dev/input/by-path/*event* >/dev/null 2>&1 && INFO "input" "$(grep -h '^N: Name' /proc/bus/input/devices | cut -d'"' -f2 | tr '\n' ',' | sed 's/,$//')"
+
+# --- Audio ----------------------------------------------------------------------
+if grep -q . /proc/asound/cards 2>/dev/null && ! grep -q "no soundcards" /proc/asound/cards; then
+    PASS "audio" "$(grep -E '^ *[0-9]+ ' /proc/asound/cards | sed 's/^ *//; s/ *\[/ [/' | cut -d: -f2 | sed 's/^ *//' | tr '\n' ';' | sed 's/;$//')"
+else
+    FAIL "audio" "no sound card"
+fi
+
+# --- RTC and time -----------------------------------------------------------------
+if [ -e /sys/class/rtc/rtc0 ]; then
+    rtcname=$(cat /sys/class/rtc/rtc0/name)
+    if cat /sys/class/rtc/rtc0/since_epoch >/dev/null 2>&1; then
+        PASS "rtc" "rtc0 ($rtcname) keeps time"
+    else
+        WARN "rtc" "rtc0 ($rtcname) has no valid time (oscillator stopped: no or empty backup battery); set by NTP when online"
+    fi
+fi
+if have timedatectl; then
+    sync=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+    [ "$sync" = yes ] && PASS "ntp" "system clock synchronized ($(date '+%F %T %Z'))" \
+        || WARN "ntp" "system clock not NTP-synchronized yet ($(date '+%F %T %Z'))"
+fi
+
+# --- Networking -------------------------------------------------------------------
+wifi=$(for n in /sys/class/net/*; do [ -d "$n/wireless" ] && printf '%s ' "${n##*/}"; done)
+[ -n "$wifi" ] && PASS "wifi" "${wifi}($(basename "$(readlink -f /sys/class/net/${wifi%% *}/device/driver)"))" \
+    || FAIL "wifi" "no wireless interface"
+if ls /sys/class/bluetooth/hci* >/dev/null 2>&1; then
+    PASS "bluetooth" "$(ls /sys/class/bluetooth | tr '\n' ' ')"
+else
+    FAIL "bluetooth" "no Bluetooth controller (hci0)"
+fi
+eth=$(for n in /sys/class/net/*; do
+        d=$(basename "$(readlink -f "$n/device/driver" 2>/dev/null)" 2>/dev/null)
+        case $d in r8152|fec|imx-dwmac|stmmaceth|dwmac-imx) printf '%s(%s,%s) ' "${n##*/}" "$d" "$(cat "$n/operstate")" ;; esac
+      done)
+[ -n "$eth" ] && PASS "ethernet" "$eth" || WARN "ethernet" "no Ethernet interface"
+[ -d /sys/module/r8152 ] && INFO "r8152" "Realtek USB Ethernet driver $(cat /sys/module/r8152/version 2>/dev/null)"
+
+# --- Other ------------------------------------------------------------------------
+[ -c /dev/tpm0 ] && PASS "tpm" "TPM 2.0 (/dev/tpm0)" || WARN "tpm" "no /dev/tpm0"
+temps=$(for z in /sys/class/thermal/thermal_zone*; do
+        [ -e "$z/temp" ] && printf '%s=%s°C ' "$(cat "$z/type")" "$(( $(cat "$z/temp") / 1000 ))"; done)
+[ -n "$temps" ] && INFO "thermal" "$temps"
+
+echo
+echo "$pass passed, $warn warnings, $fail failed"
+exit "$fail"

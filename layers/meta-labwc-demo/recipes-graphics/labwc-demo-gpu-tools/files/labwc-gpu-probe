@@ -1,0 +1,171 @@
+#!/bin/bash
+# labwc-gpu-probe: start labwc once per GPU renderer strategy, with a test
+# window, and report which strategies work. A crash is run under gdb and its
+# backtrace is printed.
+#
+#   sudo labwc-gpu-probe                 headless test of all strategies (the
+#                                        desktop keeps running)
+#   sudo labwc-gpu-probe --kms           test on the real displays: stops the
+#                                        desktop, shows each strategy for a few
+#                                        seconds, then restarts the desktop
+#   sudo labwc-gpu-probe vulkan gles2    test only these strategies
+#
+# Strategies are the ones of labwc-session (/etc/default/labwc):
+#   vulkan gles2 gles2-render gles2-device pixman
+# Logs: /tmp/labwc-gpu-probe-<time>/
+set -u
+
+usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+KMS=0
+SECONDS_PER_TEST=${SECONDS_PER_TEST:-8}
+STRATEGIES=()
+while [ $# -gt 0 ]; do
+    case $1 in
+    --kms) KMS=1 ;;
+    -t) SECONDS_PER_TEST=$2; shift ;;
+    -h|--help) usage ;;
+    -*) usage 1 ;;
+    *) STRATEGIES+=("$1") ;;
+    esac
+    shift
+done
+[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(vulkan gles2 gles2-render gles2-device pixman)
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "labwc-gpu-probe: run as root (sudo labwc-gpu-probe)" >&2
+    exit 1
+fi
+
+render_node=
+for n in /sys/class/drm/renderD*; do
+    [ -e "$n" ] && { render_node=/dev/dri/${n##*/}; break; }
+done
+kms_card=
+for c in /sys/class/drm/card[0-9]*; do
+    case ${c##*/} in *-*) continue ;; esac
+    for conn in "$c"-*; do
+        [ -e "$conn" ] && { kms_card=/dev/dri/${c##*/}; break 2; }
+    done
+done
+
+outdir=/tmp/labwc-gpu-probe-$(date +%Y%m%d-%H%M%S)
+mkdir -p "$outdir"
+runtime=$(mktemp -d /tmp/labwc-probe-runtime.XXXXXX)
+chmod 0700 "$runtime"
+cfg=$(mktemp -d /tmp/labwc-probe-config.XXXXXX)
+# Empty labwc config dir: no autostart (panel, wallpaper), default settings
+
+restart_desktop=0
+cleanup() {
+    rm -rf "$runtime" "$cfg"
+    if [ "$restart_desktop" = 1 ]; then
+        echo "Restarting the desktop (labwc.service)"
+        systemctl start labwc.service
+    fi
+}
+trap cleanup EXIT
+
+if [ "$KMS" = 1 ]; then
+    if systemctl is-active -q labwc.service; then
+        echo "Stopping the desktop (labwc.service) for the test"
+        systemctl stop labwc.service
+        restart_desktop=1
+        sleep 1
+    fi
+    chvt 7 2>/dev/null
+fi
+
+strategy_env() {
+    case $1 in
+    vulkan)       echo "WLR_RENDERER=vulkan" ;;
+    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1" ;;
+    gles2-render) echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1${render_node:+ WLR_RENDER_DRM_DEVICE=$render_node}" ;;
+    gles2-device) echo "WLR_RENDERER=gles2" ;;
+    pixman)       echo "WLR_RENDERER=pixman" ;;
+    *)            return 1 ;;
+    esac
+}
+
+echo "labwc-gpu-probe: mode $([ "$KMS" = 1 ] && echo "KMS (${kms_card:-no display device})" || echo "headless (${render_node:-no render node})")"
+echo "labwc-gpu-probe: logs in $outdir"
+echo
+
+have_gdb=0
+command -v gdb >/dev/null 2>&1 && have_gdb=1
+
+declare -A result
+for s in "${STRATEGIES[@]}"; do
+    if ! envs=$(strategy_env "$s"); then
+        echo "== $s: unknown strategy, skipped"
+        result[$s]="unknown strategy"
+        continue
+    fi
+    if [ "$KMS" = 1 ]; then
+        backend_env="LIBSEAT_BACKEND=seatd WLR_BACKENDS=drm,libinput${kms_card:+ WLR_DRM_DEVICES=$kms_card}"
+    else
+        # Headless: the renderer runs on the GPU render node
+        backend_env="WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1"
+        case $s in gles2|gles2-device|vulkan)
+            [ -n "$render_node" ] && backend_env="$backend_env WLR_RENDER_DRM_DEVICE=$render_node" ;;
+        esac
+    fi
+    log=$outdir/$s.log
+    echo "== $s ($envs)"
+    # Test client: a foot window running for a few seconds, then exit labwc
+    startup="sh -c 'foot -e sh -c \"echo labwc-gpu-probe: $s; sleep $((SECONDS_PER_TEST - 2))\" & sleep $SECONDS_PER_TEST; labwc --exit'"
+    cmd=(labwc -C "$cfg" -V -s "$startup")
+    if [ "$have_gdb" = 1 ]; then
+        cmd=(gdb -q -batch
+             -ex "set pagination off" -ex "set confirm off"
+             -ex "handle SIGTERM SIGINT SIGHUP SIGPIPE SIGCHLD SIGUSR1 SIGUSR2 nostop noprint pass"
+             -ex run
+             -ex "echo \n=== backtrace ===\n" -ex "thread apply all bt"
+             -ex "echo \n=== registers ===\n" -ex "info registers pc lr sp"
+             --args "${cmd[@]}")
+    fi
+    # shellcheck disable=SC2086
+    env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=en_US.UTF-8 \
+        XDG_RUNTIME_DIR="$runtime" WLR_LIBINPUT_NO_DEVICES=1 \
+        $backend_env $envs \
+        timeout -s KILL $((SECONDS_PER_TEST + 40)) "${cmd[@]}" > "$log" 2>&1
+    rc=$?
+
+    renderer_line=$(grep -m1 -E "Creating (GLES2|Vulkan|pixman) renderer|Using (EGL|Vulkan)|Vulkan device" "$log")
+    if grep -qE "Program received signal SIG(SEGV|ABRT|BUS|ILL|FPE|TRAP)" "$log"; then
+        sig=$(grep -m1 -oE "Program received signal SIG[A-Z]+" "$log" | awk '{print $4}')
+        result[$s]="CRASH ($sig)"
+        echo "   -> CRASH: $sig. Last log lines and backtrace:"
+        grep -vE "^\[New Thread|^\[Thread|^\[Inferior|libthread_db" "$log" \
+            | sed -n '/=== backtrace ===/q;p' | tail -n 12 | sed 's/^/      /'
+        sed -n '/=== backtrace ===/,$p' "$log" | head -n 60 | sed 's/^/      /'
+    elif [ $rc -eq 137 ]; then
+        result[$s]="HANG (killed after timeout)"
+        echo "   -> HANG: labwc did not exit, killed"
+    elif { [ "$have_gdb" = 1 ] && grep -q "exited normally" "$log"; } ||
+         { [ "$have_gdb" = 0 ] && [ $rc -eq 0 ]; }; then
+        errs=$(grep -cE "VK_ERROR|Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log")
+        if [ "$errs" -gt 0 ]; then
+            result[$s]="RAN, $errs renderer errors"
+            echo "   -> ran, but logged $errs renderer errors:"
+            grep -m5 -E "VK_ERROR|Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log" | sed 's/^/      /'
+        else
+            result[$s]="OK"
+            echo "   -> OK${renderer_line:+: ${renderer_line#*] }}"
+        fi
+    else
+        code=$(grep -m1 -oE "exited with code [0-9]+" "$log")
+        result[$s]="FAILED (${code:-exit $rc})"
+        echo "   -> FAILED (${code:-exit $rc}). Errors:"
+        grep -E "\[ERROR\]|error|Failed|failed" "$log" | grep -v "^$" | tail -n 10 | sed 's/^/      /'
+    fi
+    echo
+    sleep 1
+done
+
+echo "Summary ($([ "$KMS" = 1 ] && echo KMS || echo headless)):"
+for s in "${STRATEGIES[@]}"; do
+    printf '  %-14s %s\n' "$s" "${result[$s]}"
+done
+echo
+echo "Full logs: $outdir (include them when reporting a problem)"

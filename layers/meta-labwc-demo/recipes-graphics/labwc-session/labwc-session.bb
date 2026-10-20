@@ -1,13 +1,14 @@
 SUMMARY = "labwc desktop session for the labwc demo image"
 DESCRIPTION = "systemd unit that autostarts labwc as the unprivileged desktop user \
 on tty7 (seat via seatd, user session via PAM/pam_systemd), a session \
-wrapper with automatic pixman fallback, and default labwc, waybar, foot and \
+wrapper that picks a working GPU renderer (Vulkan, GLES2, pixman fallback), and default labwc, waybar, foot and \
 fuzzel configuration plus a wallpaper."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 SRC_URI = " \
     file://labwc-session \
+    file://labwc-demo-outputs \
     file://labwc.service \
     file://labwc-autologin \
     file://labwc.default \
@@ -44,6 +45,7 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install() {
     install -Dm0755 ${WORKDIR}/labwc-session ${D}${bindir}/labwc-session
+    install -Dm0755 ${WORKDIR}/labwc-demo-outputs ${D}${bindir}/labwc-demo-outputs
     install -Dm0644 ${WORKDIR}/labwc.service ${D}${systemd_system_unitdir}/labwc.service
     sed -i -e 's/@DESKTOP_USER@/${DESKTOP_USER}/g' ${D}${systemd_system_unitdir}/labwc.service
     install -Dm0644 ${WORKDIR}/labwc-autologin ${D}${sysconfdir}/pam.d/labwc-autologin
@@ -88,6 +90,8 @@ CONFFILES:${PN} += " \
 RDEPENDS:${PN} = " \
     labwc \
     seatd \
+    wlr-randr \
+    gawk \
     waybar \
     foot \
     fuzzel \

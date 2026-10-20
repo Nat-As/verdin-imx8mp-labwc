@@ -115,7 +115,7 @@ try:
     send("export PS1='# '")
     run("export SYSTEMD_PAGER= SYSTEMD_COLORS=0 TERM=dumb; stty cols 200")
     # Give labwc and the autostart clients time to come up under TCG
-    time.sleep(150)
+    time.sleep(int(os.environ.get("SETTLE", "150")))
     screendump("screen-boot")
     diag = []
     for cmd in [
@@ -126,6 +126,8 @@ try:
         "ls -la /run/user/1000/ 2>&1 | head; cat /run/user/1000/labwc-renderer",
         "journalctl -b -t labwc --no-pager -o cat | grep -E 'labwc-session|Creating .* renderer|Seat opened|ERROR' | head -30",
         "journalctl -b -u seatd --no-pager | tail -15",
+        "cat /tmp/labwc-session-*/renderer; echo failed:; cat /tmp/labwc-session-*/failed",
+        "labwc-hwaccel-check -q 2>&1 | head -45",
         "ls -la /dev/dri; id dev",
         f"env | grep DISPLAY; sudo -u {DESKTOP} -i sh -c 'env | grep -E DISPLAY'",
         "grep -E '^root:' /etc/shadow | cut -d: -f1-2; cat /etc/default/dropbear",

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Fetch the Toradex BSP (tag 7.7.0, tdxref manifest) plus the pinned
-# meta-wayland and meta-qt6 layers into this directory, next to our own layer in
-# layers/meta-labwc-demo. Run once after cloning, then ./build.sh.
+# meta-wayland, meta-qt6 and meta-imx (for meta-imx-ml) layers into this
+# directory, next to our own layer in layers/meta-labwc-demo. Run once after
+# cloning, then ./build.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
 

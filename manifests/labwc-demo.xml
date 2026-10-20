@@ -8,4 +8,10 @@
   <remote name="qt" fetch="https://code.qt.io"/>
   <project name="yocto/meta-qt6.git" path="layers/meta-qt6" remote="qt"
            revision="ec98b3ab1c8deeab9412ef6cbfd55729dc567b01" upstream="6.11"/>
+  <!-- NXP i.MX machine learning layer (meta-imx/meta-imx-ml only): TIM-VX,
+       TensorFlow Lite and its VX (NPU) delegate. Branch of NXP's 6.6.52-2.2.x BSP, which
+       the Toradex 7.x BSP and imx-gpu-viv 6.4.11.p2.x are based on. -->
+  <remote name="github-nxp" fetch="https://github.com/nxp-imx"/>
+  <project name="meta-imx.git" path="layers/meta-imx" remote="github-nxp"
+           revision="e1ec1a20d573e3913f4ad90fa36546ed2bc87715" upstream="scarthgap-6.6.52-2.2.2"/>
 </manifest>

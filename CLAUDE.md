@@ -48,7 +48,7 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 
 | Path | Purpose |
 |---|---|
-| `setup.sh` | `repo init/sync`: Toradex BSP **7.7.0** (`tdxref/default.xml`) + `manifests/labwc-demo.xml` (meta-wayland, meta-qt6 6.11, pinned) |
+| `setup.sh` | `repo init/sync`: Toradex BSP **7.7.0** (`tdxref/default.xml`) + `manifests/labwc-demo.xml` (meta-wayland, meta-qt6 6.11, NXP meta-imx `scarthgap-6.6.52-2.2.2`, all pinned; only `meta-imx/meta-imx-ml` is in `bblayers.conf`) |
 | `build.sh` | Logged `bitbake -k labwc-demo-image` |
 | `config/image-packages.conf`, `config/python-packages.conf` | Software lists (included from `build/conf/local.conf`) |
 | `build/conf/local.conf` | MACHINE, EULA, threads, Fortran toolchain, display overlays (7" DSI + HDMI) |
@@ -66,6 +66,20 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 - NetworkManager (connman removed, systemd-networkd/dnsmasq masked), BlueZ + Blueman.
 - Python 3.12 + numpy/scipy/pandas/matplotlib/OpenCV/PyQt6, Qt 6.11, dev tools, all kernel
   modules, Realtek out-of-tree `r8152` (preferred via depmod override).
+- GPU rendering (v0.1.0+): wlroots is built with the gles2 + vulkan renderers and two patches
+  (`recipes-wlroots/wlroots/files/`): `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead of the
+  EGL device lookup that crashed labwc with SIGSEGV on Vivante in v0.0.3) and Vulkan support for
+  drivers without `VK_EXT_physical_device_drm` (Vivante VSI). `labwc-session` tries the
+  strategies in `LABWC_RENDERERS` (default `vulkan gles2 gles2-render pixman`) and falls back on a
+  crash or renderer errors in the first 20 s; state in `/tmp/labwc-session-<uid>/`.
+- DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
+  (HDMI-A-1, LVDS-1 via the DSI-to-LVDS bridge of the 7" display). The 7" panel output always
+  reports connected; `labwc-demo-outputs` turns it off when the touch controller (I2C 1-0041)
+  is absent.
+- Diagnostics on target: `labwc-hwaccel-check` (PASS/WARN/FAIL per item) and `labwc-gpu-probe`
+  (`--kms` for the real display), from `recipes-graphics/labwc-demo-gpu-tools`.
+- GPU/NPU compute: OpenCL, OpenVX + libnn-imx, RapidOpenVX, G2D, TIM-VX, TensorFlow Lite 2.16 +
+  VX delegate (`/usr/lib/libvx_delegate.so`), OpenCV with OpenCL (opencv bbappend).
 
 ## Testing
 
@@ -83,6 +97,10 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 - Never start a second `bitbake` while a build is running in `build/`.
 - Avoid editing recipes while a build runs (basehash/taskhash noise; rerun afterwards).
 - sudo on the build host needs a password: no apt installs; host has no gfortran.
+- Image manifests show Debian-renamed package names (`libg2d2`); `IMAGE_INSTALL` needs the
+  original names (`imx-gpu-g2d`). Look them up in `build/tmp/pkgdata/<machine>/runtime-reverse/`.
+- NXP's meta-imx is under the NXP Software License Agreement: pull it via the manifest, never copy
+  its recipes into this MIT repository.
 - Backports in our layer exist for Scarthgap gaps: sip 6.16.1 + python3-packaging 24.2 (PyQt6 6.11),
   setuptools-69 compatibility seds (pyqt6-sip, pyqt-builder, sip), scipy `f2py` isolation wrapper,
   matplotlib qhull location. OE's offline `systemctl` only supports `enable`/`mask`/`preset-all`.

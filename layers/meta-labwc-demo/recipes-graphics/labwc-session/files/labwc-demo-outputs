@@ -1,0 +1,27 @@
+#!/bin/sh
+# Run from the labwc autostart: turn off the 7" DSI panel output (LVDS-1)
+# when the panel is not connected.
+#
+# The panel sits behind a DSI-to-LVDS bridge with a fixed-mode panel driver,
+# which always reports "connected", so without the display the desktop would
+# extend onto an invisible output (and new windows could open there). The
+# panel's touch controller (ILI2132, I2C bus 1, address 0x41) is used to
+# detect the display: if its driver did not bind, the display is absent.
+#
+# Disable with LABWC_DISABLE_ABSENT_PANEL=0 in /etc/default/labwc.
+[ "${LABWC_DISABLE_ABSENT_PANEL:-1}" = 1 ] || exit 0
+
+PANEL_OUTPUT=${LABWC_PANEL_OUTPUT:-LVDS-1}
+PANEL_TOUCH=${LABWC_PANEL_TOUCH:-/sys/bus/i2c/devices/1-0041}
+
+# Touch controller not in the device tree (overlay disabled) or present
+[ -e "$PANEL_TOUCH" ] || exit 0
+[ -e "$PANEL_TOUCH/driver" ] && exit 0
+
+outputs=$(wlr-randr 2>/dev/null | awk '/^[^ \t]/ {print $1}')
+echo "$outputs" | grep -qx "$PANEL_OUTPUT" || exit 0
+# Keep the panel output if it is the only one (nothing else to show on)
+[ "$(echo "$outputs" | grep -cvx "$PANEL_OUTPUT")" -gt 0 ] || exit 0
+
+echo "labwc-demo-outputs: 7\" panel not detected (no touch controller at $PANEL_TOUCH), turning off $PANEL_OUTPUT"
+wlr-randr --output "$PANEL_OUTPUT" --off

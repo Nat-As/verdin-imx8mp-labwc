@@ -1,0 +1,98 @@
+From 14296c41ad722caf5916322fa1dd0704578adc8b Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 18:16:32 -0400
+Subject: [PATCH 1/2] egl: add WLR_EGL_SKIP_DEVICE and log EGL setup steps
+
+Vendor EGL drivers like the Vivante blob on i.MX 8 crash in the EGL
+device enumeration path. WLR_EGL_SKIP_DEVICE=1 disables
+EGL_EXT_platform_device and the EGL device queries, so the display is
+created on the GBM platform for the DRM device (as Weston does). The
+renderer DRM FD then comes from the GBM device.
+
+Also log each EGL setup step at info level to locate driver crashes.
+
+Upstream-Status: Inappropriate [embedded vendor driver workaround]
+---
+ render/egl.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/render/egl.c b/render/egl.c
+index 162634b..9d391c2 100644
+--- a/render/egl.c
++++ b/render/egl.c
+@@ -219,18 +219,29 @@ static struct wlr_egl *egl_create(void) {
+ 	load_egl_proc(&egl->procs.eglGetPlatformDisplayEXT,
+ 		"eglGetPlatformDisplayEXT");
+ 
++	// WLR_EGL_SKIP_DEVICE: do not use EGL device enumeration/query
++	// (EGL_EXT_device_*, EGL_EXT_platform_device). Some vendor drivers (e.g.
++	// the Vivante blob on i.MX 8) crash in that code path; with this set, the
++	// display is created on the GBM platform for the DRM device, like Weston
++	// does.
++	bool skip_device = env_parse_bool("WLR_EGL_SKIP_DEVICE");
++	if (skip_device) {
++		wlr_log(WLR_INFO, "WLR_EGL_SKIP_DEVICE set: not using EGL device "
++			"enumeration, using the GBM platform");
++	}
++
+ 	egl->exts.KHR_platform_gbm = check_egl_ext(client_exts_str,
+ 			"EGL_KHR_platform_gbm");
+-	egl->exts.EXT_platform_device = check_egl_ext(client_exts_str,
++	egl->exts.EXT_platform_device = !skip_device && check_egl_ext(client_exts_str,
+ 			"EGL_EXT_platform_device");
+ 	egl->exts.KHR_display_reference = check_egl_ext(client_exts_str,
+ 			"EGL_KHR_display_reference");
+ 
+-	if (check_egl_ext(client_exts_str, "EGL_EXT_device_base") || check_egl_ext(client_exts_str, "EGL_EXT_device_enumeration")) {
++	if (!skip_device && (check_egl_ext(client_exts_str, "EGL_EXT_device_base") || check_egl_ext(client_exts_str, "EGL_EXT_device_enumeration"))) {
+ 		load_egl_proc(&egl->procs.eglQueryDevicesEXT, "eglQueryDevicesEXT");
+ 	}
+ 
+-	if (check_egl_ext(client_exts_str, "EGL_EXT_device_base") || check_egl_ext(client_exts_str, "EGL_EXT_device_query")) {
++	if (!skip_device && (check_egl_ext(client_exts_str, "EGL_EXT_device_base") || check_egl_ext(client_exts_str, "EGL_EXT_device_query"))) {
+ 		egl->exts.EXT_device_query = true;
+ 		load_egl_proc(&egl->procs.eglQueryDeviceStringEXT,
+ 			"eglQueryDeviceStringEXT");
+@@ -265,6 +276,7 @@ static bool egl_init_display(struct wlr_egl *egl, EGLDisplay display) {
+ 	egl->display = display;
+ 
+ 	EGLint major, minor;
++	wlr_log(WLR_INFO, "Initializing EGL display");
+ 	if (eglInitialize(egl->display, &major, &minor) == EGL_FALSE) {
+ 		wlr_log(WLR_ERROR, "Failed to initialize EGL");
+ 		return false;
+@@ -298,6 +310,7 @@ static bool egl_init_display(struct wlr_egl *egl, EGLDisplay display) {
+ 
+ 	const char *device_exts_str = NULL, *driver_name = NULL;
+ 	if (egl->exts.EXT_device_query) {
++		wlr_log(WLR_INFO, "Querying EGL device of the display");
+ 		EGLAttrib device_attrib;
+ 		if (!egl->procs.eglQueryDisplayAttribEXT(egl->display,
+ 				EGL_DEVICE_EXT, &device_attrib)) {
+@@ -380,6 +393,7 @@ static bool egl_init(struct wlr_egl *egl, EGLenum platform,
+ 	display_attribs[display_attribs_len++] = EGL_NONE;
+ 	assert(display_attribs_len < sizeof(display_attribs) / sizeof(display_attribs[0]));
+ 
++	wlr_log(WLR_INFO, "Creating EGL display (platform 0x%x)", (unsigned)platform);
+ 	EGLDisplay display = egl->procs.eglGetPlatformDisplayEXT(platform,
+ 		remote_display, display_attribs);
+ 	if (display == EGL_NO_DISPLAY) {
+@@ -510,6 +524,7 @@ static int open_render_node(int drm_fd) {
+ 			"falling back to primary node", render_name);
+ 	}
+ 
++	wlr_log(WLR_INFO, "Using DRM node '%s' for GBM", render_name);
+ 	int render_fd = open(render_name, O_RDWR | O_CLOEXEC);
+ 	if (render_fd < 0) {
+ 		wlr_log_errno(WLR_ERROR, "Failed to open DRM node '%s'", render_name);
+@@ -530,6 +545,7 @@ struct wlr_egl *wlr_egl_create_with_drm_fd(int drm_fd) {
+ 		 * Search for the EGL device matching the DRM fd using the
+ 		 * EXT_device_enumeration extension.
+ 		 */
++		wlr_log(WLR_INFO, "Looking up the EGL device for the DRM FD");
+ 		EGLDeviceEXT egl_device = get_egl_device_from_drm_fd(egl, drm_fd);
+ 		if (egl_device != EGL_NO_DEVICE_EXT) {
+ 			if (egl_init(egl, EGL_PLATFORM_DEVICE_EXT, egl_device)) {
+-- 
+2.34.1
+

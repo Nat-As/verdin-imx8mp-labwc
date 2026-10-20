@@ -1,12 +1,20 @@
-# i.MX8M Plus / Vivante: build the GLES2 renderer against imx-gpu-viv
-# (virtual/egl, virtual/libgles2, libgbm-imx) and fail loudly if it cannot be
-# found instead of silently producing a pixman-only wlroots. The pixman
-# renderer is always built and is used as the runtime fallback.
-PACKAGECONFIG:append = " opengl gbm"
-PACKAGECONFIG:remove = "vulkan x11 xwayland"
+# i.MX8M Plus / Vivante: build the GLES2 and Vulkan renderers against the
+# Vivante stack from imx-gpu-viv (libEGL/libGLESv2/libgbm, libvulkan_VSI) and
+# fail loudly if they cannot be found instead of silently producing a
+# pixman-only wlroots. The pixman renderer is always built and is used as the
+# runtime fallback (see labwc-session).
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+
+SRC_URI += " \
+    file://0001-egl-add-WLR_EGL_SKIP_DEVICE-and-log-EGL-setup-steps.patch \
+    file://0002-vulkan-support-drivers-without-VK_EXT_physical_devic.patch \
+"
+
+PACKAGECONFIG:append = " opengl gbm vulkan"
+PACKAGECONFIG:remove = "x11 xwayland"
 
 EXTRA_OEMESON += " \
-    -Drenderers=gles2 \
+    -Drenderers=gles2,vulkan \
     -Dallocators=gbm \
     -Dbackends=drm,libinput \
     -Dsession=enabled \

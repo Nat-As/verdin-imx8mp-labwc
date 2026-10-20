@@ -1,0 +1,197 @@
+From 1202d600dc6ee606f811beb8791ad76ba930767e Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 18:17:20 -0400
+Subject: [PATCH 2/2] vulkan: support drivers without
+ VK_EXT_physical_device_drm
+
+The Vivante VSI Vulkan driver on i.MX 8 (Vulkan 1.3) does not expose
+VK_EXT_physical_device_drm and does not advertise extensions that are
+core in Vulkan 1.2/1.3 (image_format_list, synchronization2).
+
+- If no physical device can be matched to the DRM device and there is
+  exactly one device without VK_EXT_physical_device_drm, use it, and use
+  the DRM FD passed to the renderer.
+- Accept required extensions that are core in the device's Vulkan
+  version, and fall back to core entry points for KHR functions.
+
+Upstream-Status: Inappropriate [embedded vendor driver workaround]
+---
+ render/vulkan/renderer.c |  8 ++++
+ render/vulkan/vulkan.c   | 98 ++++++++++++++++++++++++++++++++++------
+ 2 files changed, 91 insertions(+), 15 deletions(-)
+
+diff --git a/render/vulkan/renderer.c b/render/vulkan/renderer.c
+index d07c7c4..9f54851 100644
+--- a/render/vulkan/renderer.c
++++ b/render/vulkan/renderer.c
+@@ -2858,6 +2858,14 @@ struct wlr_renderer *wlr_vk_renderer_create_with_drm_fd(int drm_fd) {
+ 	// Do not use the drm_fd that was passed in: we should prefer the render
+ 	// node even if a primary node was provided
+ 	dev->drm_fd = vulkan_open_phdev_drm_fd(phdev);
++	if (dev->drm_fd < 0) {
++		// Physical device without DRM properties: use the DRM FD that was
++		// passed in.
++		dev->drm_fd = fcntl(drm_fd, F_DUPFD_CLOEXEC, 0);
++		if (dev->drm_fd >= 0) {
++			wlr_log(WLR_INFO, "Using the DRM FD passed to the Vulkan renderer");
++		}
++	}
+ 	if (dev->drm_fd < 0) {
+ 		vulkan_device_destroy(dev);
+ 		vulkan_instance_destroy(ini);
+diff --git a/render/vulkan/vulkan.c b/render/vulkan/vulkan.c
+index b8ba0b4..e1c2af7 100644
+--- a/render/vulkan/vulkan.c
++++ b/render/vulkan/vulkan.c
+@@ -4,8 +4,10 @@
+ #include <assert.h>
+ #include <fcntl.h>
+ #include <math.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <stdint.h>
++#include <string.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+@@ -279,6 +281,12 @@ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd)
+ 		return VK_NULL_HANDLE;
+ 	}
+ 
++	// Drivers without VK_EXT_physical_device_drm (e.g. the Vivante VSI
++	// driver on i.MX 8) cannot be matched to the DRM device. If there is
++	// exactly one such device, use it.
++	VkPhysicalDevice fallback_phdev = VK_NULL_HANDLE;
++	uint32_t fallback_count = 0;
++
+ 	for (uint32_t i = 0; i < num_phdevs; ++i) {
+ 		VkPhysicalDevice phdev = phdevs[i];
+ 
+@@ -345,9 +353,11 @@ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd)
+ 		}
+ 
+ 		if (!has_drm_props) {
+-			wlr_log(WLR_DEBUG, "  Ignoring physical device \"%s\": "
++			wlr_log(WLR_INFO, "  Physical device \"%s\": "
+ 				"VK_EXT_physical_device_drm not supported",
+ 				phdev_props.deviceName);
++			fallback_phdev = phdev;
++			fallback_count++;
+ 			continue;
+ 		}
+ 
+@@ -361,12 +371,40 @@ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd)
+ 		}
+ 	}
+ 
++	if (fallback_count == 1) {
++		wlr_log(WLR_INFO, "Using the only Vulkan physical device, which "
++			"cannot be matched to the DRM device");
++		return fallback_phdev;
++	}
++
+ 	return VK_NULL_HANDLE;
+ }
+ 
++static bool phdev_has_extension(VkPhysicalDevice phdev, const char *name) {
++	uint32_t count = 0;
++	if (vkEnumerateDeviceExtensionProperties(phdev, NULL, &count, NULL) != VK_SUCCESS ||
++			count == 0) {
++		return false;
++	}
++	VkExtensionProperties *props = calloc(count, sizeof(*props));
++	if (props == NULL) {
++		return false;
++	}
++	bool found = false;
++	if (vkEnumerateDeviceExtensionProperties(phdev, NULL, &count, props) == VK_SUCCESS) {
++		found = check_extension(props, count, name);
++	}
++	free(props);
++	return found;
++}
++
+ int vulkan_open_phdev_drm_fd(VkPhysicalDevice phdev) {
+-	// vulkan_find_drm_phdev() already checks that VK_EXT_physical_device_drm
+-	// is supported
++	if (!phdev_has_extension(phdev, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME)) {
++		wlr_log(WLR_INFO, "VK_EXT_physical_device_drm not supported, "
++			"cannot open the DRM node of the physical device");
++		return -1;
++	}
++
+ 	VkPhysicalDeviceDrmPropertiesEXT drm_props = {
+ 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+ 	};
+@@ -414,6 +452,17 @@ static void load_device_proc(struct wlr_vk_device *dev, const char *name,
+ 		void *proc_ptr) {
+ 	void *proc = (void *)vkGetDeviceProcAddr(dev->dev, name);
+ 	if (proc == NULL) {
++		// The extension may be core in the device's Vulkan version and not
++		// be advertised: try the core entry point (name without "KHR").
++		size_t len = strlen(name);
++		if (len > 3 && strcmp(name + len - 3, "KHR") == 0) {
++			char core_name[128];
++			snprintf(core_name, sizeof(core_name), "%.*s", (int)(len - 3), name);
++			proc = (void *)vkGetDeviceProcAddr(dev->dev, core_name);
++		}
++	}
++	if (proc == NULL) {
++		wlr_log(WLR_ERROR, "vulkan: device function %s not found", name);
+ 		abort();
+ 	}
+ 	*(void **)proc_ptr = proc;
+@@ -461,19 +510,38 @@ struct wlr_vk_device *vulkan_device_create(struct wlr_vk_instance *ini,
+ 	// extensions before the device is created
+ 	const char *extensions[32] = {0};
+ 	size_t extensions_len = 0;
+-	extensions[extensions_len++] = VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME;
+-	extensions[extensions_len++] = VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME;
+-	extensions[extensions_len++] = VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME; // or vulkan 1.2
+-	extensions[extensions_len++] = VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME;
+-	extensions[extensions_len++] = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
+-	extensions[extensions_len++] = VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME;
+-	extensions[extensions_len++] = VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME; // or vulkan 1.2
+-	extensions[extensions_len++] = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME; // or vulkan 1.3
+-
+-	for (size_t i = 0; i < extensions_len; i++) {
+-		if (!check_extension(avail_ext_props, avail_extc, extensions[i])) {
++
++	// Extensions promoted to core may not be advertised by drivers that
++	// implement that core version (e.g. the Vivante VSI driver, Vulkan 1.3):
++	// accept the core functionality in that case.
++	VkPhysicalDeviceProperties phdev_props;
++	vkGetPhysicalDeviceProperties(phdev, &phdev_props);
++	const struct {
++		const char *name;
++		uint32_t core_version;
++	} required_exts[] = {
++		{ VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, 0 },
++		{ VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, 0 },
++		{ VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME, VK_API_VERSION_1_2 },
++		{ VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME, 0 },
++		{ VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME, 0 },
++		{ VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME, 0 },
++		{ VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_API_VERSION_1_2 },
++		{ VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_API_VERSION_1_3 },
++	};
++
++	for (size_t i = 0; i < sizeof(required_exts) / sizeof(required_exts[0]); i++) {
++		const char *name = required_exts[i].name;
++		uint32_t core = required_exts[i].core_version;
++		if (check_extension(avail_ext_props, avail_extc, name)) {
++			extensions[extensions_len++] = name;
++		} else if (core != 0 && phdev_props.apiVersion >= core) {
++			wlr_log(WLR_INFO, "vulkan: %s not advertised, using core "
++				"Vulkan %u.%u functionality", name,
++				VK_API_VERSION_MAJOR(core), VK_API_VERSION_MINOR(core));
++		} else {
+ 			wlr_log(WLR_ERROR, "vulkan: required device extension %s not found",
+-				extensions[i]);
++				name);
+ 			goto error;
+ 		}
+ 	}
+-- 
+2.34.1
+
