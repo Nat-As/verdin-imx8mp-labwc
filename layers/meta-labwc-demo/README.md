@@ -11,7 +11,9 @@ Contents:
   `tdx-reference-multimedia-image`, with Weston replaced by labwc)
 - `recipes-graphics/labwc-session`: systemd unit, PAM service, session
   wrapper (hardware renderer with pixman fallback), default labwc and waybar
-  config, wallpaper, and the `dev` user
+  config, wallpaper, and the desktop user (`LABWC_DEMO_DESKTOP_USER`)
+- `recipes-core/labwc-demo-admin`: administrator account with sudo
+  (`LABWC_DEMO_ADMIN_USER`); root login is disabled
 - `recipes-bsp/u-boot-env-mallow`: Tezi U-Boot environment with
   `fdt_board=mallow`, so the Mallow device tree is selected on first boot
 - `recipes-wlroots`, `recipes-gtk`, `recipes-support`: bbappends for wlroots

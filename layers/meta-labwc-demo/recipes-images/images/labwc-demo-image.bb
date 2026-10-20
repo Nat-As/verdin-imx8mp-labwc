@@ -44,6 +44,7 @@ IMAGE_INSTALL += " \
 # --- labwc desktop ------------------------------------------------------------
 IMAGE_INSTALL += " \
     labwc-session \
+    labwc-demo-admin \
     wlr-randr \
     wl-clipboard \
 "
@@ -78,36 +79,44 @@ disable_conflicting_services () {
 ROOTFS_POSTPROCESS_COMMAND += "disable_conflicting_services;"
 
 # SSH server: Toradex images ship dropbear (packagegroup-basic); make it
-# explicit. debug-tweaks (local.conf) allows root login with an empty
-# password; the "dev" user has password "dev".
+# explicit. Root login is disabled (no debug-tweaks in local.conf): log in as
+# the desktop or admin user (see "Logins" below).
 IMAGE_FEATURES += "ssh-server-dropbear"
 
 # Boot into the graphical target so labwc.service starts
 SYSTEMD_DEFAULT_TARGET = "graphical.target"
 
 # --- Logins -------------------------------------------------------------------
-# User "dev" is created by labwc-session; set its password to "dev".
-# Hash generated with: openssl passwd -6 -salt labwcdemo dev
-LABWC_DEMO_DEV_PASSWORD_HASH = "$6$labwcdemo$NCE3oMD5Q7/pCJv69NBtd38SRDxNB3gQZ4ALLLNQqM2fHlpe7ERLLog/i6UvbKuj4nr0PnkJc8sw4q8PL8sfw0"
+# The desktop user (labwc-session) and the admin user (labwc-demo-admin) are
+# named in conf/layer.conf (LABWC_DEMO_DESKTOP_USER / LABWC_DEMO_ADMIN_USER).
+# Root has no password and cannot log in; the admin user has sudo.
+# Hashes generated with: openssl passwd -6 -salt <salt> <password>
+#   argos_user   / argos_user
+#   alakai_admin / alakai_admin
+LABWC_DEMO_DESKTOP_PASSWORD_HASH ?= "$6$argosuser$srko56.K9Wjx2gBB3qcwOd8uhu3rjyKFMKQDcPB7G1Fh5SWsf07V2Edju.WxyO8R9PiSv5qtTY7oHVqd94pXr1"
+LABWC_DEMO_ADMIN_PASSWORD_HASH ?= "$6$alakaiadm$WpIBw9WmCQav/UgMhWcKDHXk/5J/S4AIv/J.XjndUdu/9eT/wtXzxiki4wutNs2djPoaJaRMmWHP.4LkRTseu0"
 
-# Login shell for root ("dev" gets it from labwc-session). Used by dropbear
-# (SSH) and the serial console. Must be listed in /etc/shells.
+# Login shell for root (used by "sudo -i"). Must be listed in /etc/shells.
 LABWC_DEMO_ROOT_SHELL ?= "${bindir}/fish"
 
-python set_dev_password () {
+python set_passwords () {
     shadow = os.path.join(d.getVar('IMAGE_ROOTFS'), 'etc', 'shadow')
-    pw = d.getVar('LABWC_DEMO_DEV_PASSWORD_HASH')
+    passwords = {
+        d.getVar('LABWC_DEMO_DESKTOP_USER'): d.getVar('LABWC_DEMO_DESKTOP_PASSWORD_HASH'),
+        d.getVar('LABWC_DEMO_ADMIN_USER'): d.getVar('LABWC_DEMO_ADMIN_PASSWORD_HASH'),
+    }
     with open(shadow) as f:
         lines = f.read().splitlines()
-    found = False
+    done = set()
     for i, line in enumerate(lines):
         fields = line.split(':')
-        if fields[0] == 'dev':
-            fields[1] = pw
+        if fields[0] in passwords:
+            fields[1] = passwords[fields[0]]
             lines[i] = ':'.join(fields)
-            found = True
-    if not found:
-        bb.fatal("user 'dev' not found in %s" % shadow)
+            done.add(fields[0])
+    missing = set(passwords) - done
+    if missing:
+        bb.fatal("users %s not found in %s" % (", ".join(sorted(missing)), shadow))
     with open(shadow, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 }
@@ -134,7 +143,7 @@ python set_root_shell () {
         f.write('\n'.join(lines) + '\n')
 }
 
-ROOTFS_POSTPROCESS_COMMAND += "set_dev_password; set_root_shell;"
+ROOTFS_POSTPROCESS_COMMAND += "set_passwords; set_root_shell;"
 
 # --- Toradex Easy Installer: select the Mallow carrier board -----------------
 # Tezi writes this U-Boot environment to the module. It is the default

@@ -15,7 +15,7 @@ on DRM/KMS, with no X11 or Xwayland. The desktop shows on the
 | Desktop | labwc 0.7.1 (wlroots 0.17.2), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
 | Shell | fish (default for the terminal, SSH and the console), bash |
 | Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
-| Tools | nano, neofetch, htop, tmux, git, curl, wget, rsync, nmap |
+| Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
@@ -23,12 +23,12 @@ on DRM/KMS, with no X11 or Xwayland. The desktop shows on the
 
 ## Download and install
 
-**Pre-release v0.0.2:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar)** (362 MB)
+**Pre-release v0.0.3:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.3.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.3.tar)** (395 MB)
 
-SHA-256: `4cd72acaa7898beee3f35a6edc6aefd04f90159dcfa10ca3bf88c43dd683d1a4`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.0.2),
+SHA-256: `4388bff50ef2c7801fe982501efba92b1e2c9479ac3331102b6bda085e100c57`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.0.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.3.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.0.3),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -36,7 +36,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.2.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.0.3.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -107,23 +107,25 @@ take a few minutes to an hour, depending on what changed.
 
 | User | Password | Notes |
 |---|---|---|
-| `dev` | `dev` | The desktop runs as this user. Can use `sudo`. |
-| `root` | *(empty)* | Serial console and SSH. |
+| `argos_user` | `argos_user` | Desktop user: the desktop runs as this user. Can power off and reboot. |
+| `alakai_admin` | `alakai_admin` | Administrator: use `sudo` for system tasks. |
 
-The login shell of both users is **fish**. Run `bash` for a POSIX shell, or change the default
-with `chsh -s /bin/bash`.
+Direct `root` login is disabled. Run administrative commands as `alakai_admin` with `sudo`, or get a
+root shell with `sudo -i`. The login shell of the accounts is **fish**; run `bash` for a POSIX shell,
+or change it with `chsh -s /bin/bash`.
 
 SSH is enabled. The board gets an address over DHCP on Ethernet (or Wi-Fi, see below):
 
 ```sh
-ssh dev@<board-ip>
+ssh argos_user@<board-ip>
+ssh alakai_admin@<board-ip>
 ```
 
 The hostname is `verdin-imx8mp-<serial-number>`, and mDNS is enabled, so
-`ssh dev@verdin-imx8mp-<serial-number>.local` also works.
+`ssh argos_user@verdin-imx8mp-<serial-number>.local` also works.
 
-> **This is a development image.** Change both passwords before connecting the board to anything
-> other than a lab network.
+> **Change both passwords** (`passwd`) before connecting the board to anything other than a lab
+> network.
 
 ## Use the desktop
 
@@ -141,7 +143,7 @@ The hostname is `verdin-imx8mp-<serial-number>`, and mDNS is enabled, so
 The touchscreen is enabled (tap to select and click). A keyboard and mouse can be plugged in at any
 time.
 
-To start GUI programs over SSH, log in as `dev` while the desktop is running, then run them
+To start GUI programs over SSH, log in as `argos_user` while the desktop is running, then run them
 (for example `foot &`).
 
 ### Python and Qt
@@ -166,11 +168,13 @@ desktop. tkinter is installed, but Tk is an X11 toolkit, so tkinter windows need
 | Display overlays | `/boot/overlays.txt` (reboot after a change) |
 
 After a desktop configuration change, select **Restart session** in the desktop menu, or run
-`sudo systemctl restart labwc`.
+`sudo systemctl restart labwc` as `alakai_admin`.
 
 ### Troubleshooting
 
-- **Show the desktop log:** `journalctl -b -t labwc`
+System commands below need `sudo`, so run them as `alakai_admin`.
+
+- **Show the desktop log:** `sudo journalctl -b -t labwc`
 - **Black or garbled screen:** switch to software rendering. Add `WLR_RENDERER=pixman` to
   `/etc/default/labwc`, then run `sudo systemctl restart labwc`.
 - **Touch input lands in the wrong place with HDMI also connected:** touch is mapped to the 7"

@@ -1,0 +1,4 @@
+# Desktop user (@DESKTOP_USER@): power off / reboot from the desktop without a
+# password. logind would need polkit for this, which the image does not ship.
+# Administration is done with the admin account (see labwc-demo-admin).
+@DESKTOP_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot

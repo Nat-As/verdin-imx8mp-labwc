@@ -89,6 +89,7 @@ jobs:
           for pn in labwc-demo-image labwc-session labwc wlroots-0.17 waybar foot \
                     fuzzel swaybg seatd u-boot-env-mallow imx-gpu-viv linux-toradex \
                     fish neofetch realtek-r8152 networkmanager blueman nmap nano \
+                    tree man-db man-pages gzip git labwc-demo-admin \
                     python3-scipy python3-pandas python3-matplotlib opencv \
                     qtbase qtwayland python3-pyqt6; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }

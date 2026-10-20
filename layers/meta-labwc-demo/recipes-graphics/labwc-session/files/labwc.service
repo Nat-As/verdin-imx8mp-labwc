@@ -1,4 +1,5 @@
-# System unit that starts labwc on tty7 as the unprivileged user "dev".
+# System unit that starts labwc on tty7 as the unprivileged desktop user
+# (@DESKTOP_USER@, see LABWC_DEMO_DESKTOP_USER).
 #
 # Seat/device access: seatd (seatd.service, socket group "video") opens the
 # DRM and input devices for the compositor via libseat, so labwc does not
@@ -9,7 +10,7 @@
 # logind authorises Session.Activate via polkit, and the image ships no
 # polkit daemon (see meta-labwc-demo/recipes-core/seatd).
 [Unit]
-Description=labwc Wayland compositor (autologin session for user dev)
+Description=labwc Wayland compositor (autologin session for user @DESKTOP_USER@)
 Documentation=man:labwc(1) https://labwc.github.io/
 
 # Start after logins are permitted.
@@ -56,8 +57,8 @@ ExecStart=/usr/bin/labwc-session
 # Back to the text console when the session ends or fails.
 ExecStopPost=+/usr/bin/chvt 1
 
-User=dev
-Group=dev
+User=@DESKTOP_USER@
+Group=@DESKTOP_USER@
 WorkingDirectory=~
 
 # Full user session (XDG_RUNTIME_DIR, logind session, user D-Bus).

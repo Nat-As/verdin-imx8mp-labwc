@@ -1,5 +1,5 @@
 SUMMARY = "labwc desktop session for the labwc demo image"
-DESCRIPTION = "systemd unit that autostarts labwc as the unprivileged user 'dev' \
+DESCRIPTION = "systemd unit that autostarts labwc as the unprivileged desktop user \
 on tty7 (seat via seatd, user session via PAM/pam_systemd), a session \
 wrapper with automatic pixman fallback, and default labwc, waybar, foot and \
 fuzzel configuration plus a wallpaper."
@@ -13,7 +13,7 @@ SRC_URI = " \
     file://labwc.default \
     file://labwc-wayland.sh \
     file://90-labwc-demo-gpu.rules \
-    file://dev.sudoers \
+    file://desktop-user.sudoers \
     file://rc.xml \
     file://menu.xml \
     file://autostart \
@@ -31,11 +31,13 @@ inherit systemd useradd features_check
 
 REQUIRED_DISTRO_FEATURES = "wayland systemd pam"
 
-# The desktop user. Its password ("dev") is set by the image recipe.
+# The desktop user (LABWC_DEMO_DESKTOP_USER, conf/layer.conf). Its password is
+# set by the image recipe.
+DESKTOP_USER = "${LABWC_DEMO_DESKTOP_USER}"
 USERADD_PACKAGES = "${PN}"
 GROUPADD_PARAM:${PN} = "-r render; -r input; -r wayland"
-USERADD_PARAM:${PN} = "--create-home --home-dir /home/dev --shell ${bindir}/fish \
-    --user-group -G video,input,render,audio,wayland dev"
+USERADD_PARAM:${PN} = "--uid 1000 --create-home --home-dir /home/${DESKTOP_USER} --shell ${bindir}/fish \
+    --user-group -G video,input,render,audio,wayland ${DESKTOP_USER}"
 
 SYSTEMD_SERVICE:${PN} = "labwc.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
@@ -43,11 +45,13 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 do_install() {
     install -Dm0755 ${WORKDIR}/labwc-session ${D}${bindir}/labwc-session
     install -Dm0644 ${WORKDIR}/labwc.service ${D}${systemd_system_unitdir}/labwc.service
+    sed -i -e 's/@DESKTOP_USER@/${DESKTOP_USER}/g' ${D}${systemd_system_unitdir}/labwc.service
     install -Dm0644 ${WORKDIR}/labwc-autologin ${D}${sysconfdir}/pam.d/labwc-autologin
     install -Dm0644 ${WORKDIR}/labwc.default ${D}${sysconfdir}/default/labwc
     install -Dm0644 ${WORKDIR}/labwc-wayland.sh ${D}${sysconfdir}/profile.d/labwc-wayland.sh
     install -Dm0644 ${WORKDIR}/90-labwc-demo-gpu.rules ${D}${sysconfdir}/udev/rules.d/90-labwc-demo-gpu.rules
-    install -Dm0440 ${WORKDIR}/dev.sudoers ${D}${sysconfdir}/sudoers.d/dev
+    install -Dm0440 ${WORKDIR}/desktop-user.sudoers ${D}${sysconfdir}/sudoers.d/${DESKTOP_USER}
+    sed -i -e 's/@DESKTOP_USER@/${DESKTOP_USER}/g' ${D}${sysconfdir}/sudoers.d/${DESKTOP_USER}
 
     # labwc reads $XDG_CONFIG_HOME/labwc first, then $XDG_CONFIG_DIRS/labwc
     for f in rc.xml menu.xml autostart environment; do

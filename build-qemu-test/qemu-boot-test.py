@@ -88,6 +88,11 @@ def screendump(name):
 
 MARK = "__CMD_DONE__"
 
+# Accounts of the image (conf/layer.conf of meta-labwc-demo)
+DESKTOP = os.environ.get("DESKTOP_USER", "argos_user")
+ADMIN = os.environ.get("ADMIN_USER", "alakai_admin")
+ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "alakai_admin")
+
 
 def run(cmd, timeout=120):
     # The marker is split in the command line so that the terminal's echo of
@@ -97,10 +102,17 @@ def run(cmd, timeout=120):
 
 
 try:
+    # Root login is disabled: log in as the admin user and elevate with sudo
     read_until("login:", 900)
-    t_login = time.time()
-    send("root")
-    read_until("# ", 120)
+    send(ADMIN)
+    read_until("assword:", 60)
+    send(ADMIN_PW)
+    time.sleep(5)
+    send("exec sudo -i bash")
+    read_until("assword:", 60)
+    send(ADMIN_PW)
+    time.sleep(3)
+    send("export PS1='# '")
     run("export SYSTEMD_PAGER= SYSTEMD_COLORS=0 TERM=dumb; stty cols 200")
     # Give labwc and the autostart clients time to come up under TCG
     time.sleep(150)
@@ -115,14 +127,15 @@ try:
         "journalctl -b -t labwc --no-pager -o cat | grep -E 'labwc-session|Creating .* renderer|Seat opened|ERROR' | head -30",
         "journalctl -b -u seatd --no-pager | tail -15",
         "ls -la /dev/dri; id dev",
-        "env | grep DISPLAY; sudo -u dev -i sh -c 'env | grep -E DISPLAY'",
+        f"env | grep DISPLAY; sudo -u {DESKTOP} -i sh -c 'env | grep -E DISPLAY'",
+        "grep -E '^root:' /etc/shadow | cut -d: -f1-2; cat /etc/default/dropbear",
         "systemd-cgls --no-pager -u user.slice | head -20; systemctl status labwc --no-pager | grep -A3 CGroup",
         "journalctl -b --no-pager -o verbose -g labwc-session | grep -E '_SYSTEMD_UNIT|_SYSTEMD_USER_UNIT|SYSLOG_IDENTIFIER|MESSAGE=' | head -12",
         "journalctl -b --no-pager _UID=1000 -o cat | grep -E 'labwc-session|Creating .* renderer|GLES2|EGL|Failed|ERROR' | head -30",
     ]:
         diag.append(f"$ {cmd}\n{run(cmd)}\n")
-    # Launch a terminal into the running session as dev to check client startup
-    run("runuser -u dev -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 LANG=en_US.UTF-8 sh -c 'foot -T htop htop >/tmp/foot.log 2>&1 &'")
+    # Launch a terminal into the running session as the desktop user
+    run(f"cd /tmp && runuser -u {DESKTOP} -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 LANG=en_US.UTF-8 sh -c 'foot -T htop htop >/tmp/foot.log 2>&1 &'")
     time.sleep(60)
     screendump("screen-foot")
     diag.append(f"$ cat /tmp/foot.log\n{run('cat /tmp/foot.log')}\n")
