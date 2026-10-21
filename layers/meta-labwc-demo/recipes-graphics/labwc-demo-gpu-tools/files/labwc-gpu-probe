@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan gles2-device pixman)
+[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan vulkan-copy vulkan-noforeign gles2-device pixman)
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "labwc-gpu-probe: run as root (sudo labwc-gpu-probe)" >&2
@@ -77,12 +77,17 @@ if [ "$KMS" = 1 ]; then
     chvt 7 2>/dev/null
 fi
 
+# Same strategies as labwc-session (GPU strategies wait for the GPU after
+# each frame, WLR_RENDERER_FINISH=1)
 strategy_env() {
+    local finish=" WLR_RENDERER_FINISH=1"
     case $1 in
-    vulkan)       echo "WLR_RENDERER=vulkan" ;;
-    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1" ;;
-    gles2-render) echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1${render_node:+ WLR_RENDER_DRM_DEVICE=$render_node}" ;;
-    gles2-device) echo "WLR_RENDERER=gles2" ;;
+    vulkan)       echo "WLR_RENDERER=vulkan$finish" ;;
+    vulkan-copy)  echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
+    vulkan-noforeign) echo "WLR_RENDERER=vulkan WLR_VK_NO_FOREIGN=1$finish" ;;
+    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1$finish" ;;
+    gles2-render) echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1${render_node:+ WLR_RENDER_DRM_DEVICE=$render_node}$finish" ;;
+    gles2-device) echo "WLR_RENDERER=gles2$finish" ;;
     pixman)       echo "WLR_RENDERER=pixman" ;;
     *)            return 1 ;;
     esac
@@ -94,6 +99,13 @@ echo
 
 have_gdb=0
 command -v gdb >/dev/null 2>&1 && have_gdb=1
+
+# Which Vulkan operations reach a display buffer's memory (no display needed)
+if command -v vk-scanout-test >/dev/null 2>&1; then
+    echo "== vk-scanout-test (Vulkan writes into a display buffer)"
+    timeout 120 vk-scanout-test ${kms_card:+-d $kms_card} 2>&1 | tee "$outdir/vk-scanout-test.log" | sed 's/^/   /'
+    echo
+fi
 
 declare -A result
 for s in "${STRATEGIES[@]}"; do

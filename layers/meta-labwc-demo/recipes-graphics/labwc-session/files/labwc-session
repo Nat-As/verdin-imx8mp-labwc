@@ -9,10 +9,18 @@
 #   gles2         GLES2 renderer on the display device (EGL GBM platform on
 #                 the imx-drm KMS node, like Weston; WLR_EGL_SKIP_DEVICE=1)
 #   gles2-render  GLES2 renderer on the GPU render node (/dev/dri/renderD*)
-#   vulkan        Vulkan renderer (Vivante VSI Vulkan 1.3). Experimental and
-#                 not in the default list: on the i.MX8MP it starts without
-#                 errors, but its frames never reach the display (black
-#                 screen), which this script cannot detect.
+#   vulkan        Vulkan renderer (Vivante VSI Vulkan 1.3), rendering into
+#                 the display buffers directly. Experimental, not in the
+#                 default list: on the i.MX8MP (v0.1.0) it starts without
+#                 errors but the screen stays black, which this script cannot
+#                 detect.
+#   vulkan-copy   Vulkan, rendering into a GPU-private image that is copied
+#                 into the display buffer (WLR_VK_RENDER_COPY=1)
+#   vulkan-noforeign  Vulkan without queue ownership transfers
+#                 (WLR_VK_NO_FOREIGN=1)
+#   vulkan-auto   runs vk-scanout-test, which checks which Vulkan operations
+#                 reach a display buffer's memory, then uses vulkan or
+#                 vulkan-copy accordingly, or is skipped
 #   gles2-device  GLES2 with wlroots' EGL device lookup (crashed in v0.0.3;
 #                 only for diagnosis)
 #   pixman        CPU software rendering (always works, slow)
@@ -21,8 +29,12 @@
 # within LABWC_FALLBACK_WINDOW seconds, or if it does not answer Wayland
 # clients within LABWC_START_TIMEOUT seconds (a hanging GPU driver). A
 # strategy that crashes labwc (signal) later is skipped until the next reboot
-# as well. Setting WLR_RENDERER skips
-# this and uses that renderer only.
+# as well. Setting WLR_RENDERER skips this and uses that renderer only.
+#
+# GPU strategies wait for the GPU to finish each frame before it is shown
+# (WLR_RENDERER_FINISH=1): the Vivante driver does not provide the implicit
+# fence that would make the display wait, so without it parts of the screen
+# that are being redrawn can flash black. Disable with LABWC_RENDER_FINISH=0.
 #
 # The strategy in use is written to /tmp/labwc-session-<uid>/renderer
 # (shown by labwc-hwaccel-check); every attempt is logged to the journal
@@ -31,6 +43,7 @@
 LABWC_RENDERERS=${LABWC_RENDERERS:-"gles2 gles2-render pixman"}
 LABWC_FALLBACK_WINDOW=${LABWC_FALLBACK_WINDOW:-20}
 LABWC_START_TIMEOUT=${LABWC_START_TIMEOUT:-45}
+LABWC_RENDER_FINISH=${LABWC_RENDER_FINISH:-1}
 # Renderer error lines within the window that make a strategy fail
 LABWC_RENDER_ERROR_LIMIT=${LABWC_RENDER_ERROR_LIMIT:-5}
 # Extra labwc arguments. Default -V (info level) so the journal shows which
@@ -101,13 +114,27 @@ fi
 
 # Print the environment assignments for a strategy, or fail if unknown
 strategy_env() {
+    finish=
+    [ "$LABWC_RENDER_FINISH" = 1 ] && finish=" WLR_RENDERER_FINISH=1"
     case $1 in
-    vulkan)       echo "WLR_RENDERER=vulkan" ;;
-    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1" ;;
+    vulkan)       echo "WLR_RENDERER=vulkan$finish" ;;
+    vulkan-copy)  echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
+    vulkan-noforeign) echo "WLR_RENDERER=vulkan WLR_VK_NO_FOREIGN=1$finish" ;;
+    vulkan-auto)
+        mode=$(timeout 60 vk-scanout-test -q 2>/dev/null)
+        case $mode in
+        direct) log "vk-scanout-test: Vulkan renders into display buffers" >&2
+                echo "WLR_RENDERER=vulkan$finish" ;;
+        copy)   log "vk-scanout-test: Vulkan needs render-copy mode" >&2
+                echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
+        *)      log "vk-scanout-test: no Vulkan mode reaches the display buffers (${mode:-test failed})" >&2
+                return 1 ;;
+        esac ;;
+    gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1$finish" ;;
     gles2-render)
         node=$(render_node) || return 1
-        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1 WLR_RENDER_DRM_DEVICE=$node" ;;
-    gles2-device) echo "WLR_RENDERER=gles2" ;;
+        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1 WLR_RENDER_DRM_DEVICE=$node$finish" ;;
+    gles2-device) echo "WLR_RENDERER=gles2$finish" ;;
     pixman)       echo "WLR_RENDERER=pixman" ;;
     *)            return 1 ;;
     esac

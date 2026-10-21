@@ -1,0 +1,426 @@
+From 3bdf4f072141184058a5af801c549e31f0f28b3b Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 10:50:34 -0400
+Subject: [PATCH 4/4] vulkan: add render-copy, no-foreign and finish driver
+ workarounds
+
+Workarounds for drivers that accept a linear DMA-BUF image as color
+attachment but whose rendering never reaches the display (Vivante VSI on
+i.MX8M Plus, black screen), selected with environment variables:
+
+- WLR_VK_RENDER_COPY: render into an optimal-tiling image of the same
+  format and copy the updated region into the DMA-BUF image with
+  vkCmdCopyImage.
+- WLR_VK_NO_FOREIGN: don't transfer the render buffer's ownership to and
+  from VK_QUEUE_FAMILY_FOREIGN_EXT.
+- WLR_RENDERER_FINISH: wait for the queue to become idle after each
+  render pass.
+---
+ include/render/vulkan.h  |  16 +++++
+ render/vulkan/pass.c     | 143 ++++++++++++++++++++++++++++++++++++---
+ render/vulkan/renderer.c | 101 ++++++++++++++++++++++++++-
+ render/vulkan/texture.c  |   4 +-
+ 4 files changed, 253 insertions(+), 11 deletions(-)
+
+diff --git a/include/render/vulkan.h b/include/render/vulkan.h
+index 3e0c395..f5e70b6 100644
+--- a/include/render/vulkan.h
++++ b/include/render/vulkan.h
+@@ -211,6 +211,13 @@ struct wlr_vk_render_buffer {
+ 	VkDescriptorSet blend_descriptor_set;
+ 	struct wlr_vk_descriptor_pool *blend_attachment_pool;
+ 	bool blend_transitioned;
++
++	// WLR_VK_RENDER_COPY: render into this optimal-tiling image, then copy
++	// the updated region into the DMA-BUF image
++	VkImage copy_image;
++	VkImageView copy_image_view;
++	VkDeviceMemory copy_memory;
++	bool copy_transitioned;
+ };
+ 
+ struct wlr_vk_command_buffer {
+@@ -234,6 +241,15 @@ struct wlr_vk_renderer {
+ 	struct wlr_backend *backend;
+ 	struct wlr_vk_device *dev;
+ 
++	// Driver workarounds, set from the environment:
++	// WLR_VK_RENDER_COPY: don't render into DMA-BUF images directly
++	bool render_copy;
++	// WLR_VK_NO_FOREIGN: no queue family ownership transfers for the
++	// render buffer
++	bool no_foreign;
++	// WLR_RENDERER_FINISH: wait for the queue after each render pass
++	bool finish;
++
+ 	VkCommandPool command_pool;
+ 
+ 	VkShaderModule vert_module;
+diff --git a/render/vulkan/pass.c b/render/vulkan/pass.c
+index 42bd6b4..6d6f828 100644
+--- a/render/vulkan/pass.c
++++ b/render/vulkan/pass.c
+@@ -122,6 +122,83 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 
+ 	vkCmdEndRenderPass(render_cb->vk);
+ 
++	if (render_buffer->copy_image) {
++		// WLR_VK_RENDER_COPY: copy the updated region from the copy image
++		// into the DMA-BUF image
++		VkImageMemoryBarrier copy_barriers[2] = {
++			{
++				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++				.image = render_buffer->copy_image,
++				.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
++				.newLayout = VK_IMAGE_LAYOUT_GENERAL,
++				.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++				.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
++				.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++				.subresourceRange.layerCount = 1,
++				.subresourceRange.levelCount = 1,
++			},
++			{
++				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++				.image = render_buffer->image,
++				.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
++				.newLayout = VK_IMAGE_LAYOUT_GENERAL,
++				.srcAccessMask = 0,
++				.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
++				.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++				.subresourceRange.layerCount = 1,
++				.subresourceRange.levelCount = 1,
++			},
++		};
++		vkCmdPipelineBarrier(render_cb->vk,
++			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
++			VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 2, copy_barriers);
++
++		int width = render_buffer->wlr_buffer->width;
++		int height = render_buffer->wlr_buffer->height;
++		const pixman_region32_t *updated = rect_union_evaluate(&pass->updated_region);
++		int rects_len;
++		const pixman_box32_t *rects = pixman_region32_rectangles(updated, &rects_len);
++		VkImageCopy *regions = calloc(rects_len > 0 ? rects_len : 1, sizeof(*regions));
++		if (regions == NULL) {
++			wlr_log_errno(WLR_ERROR, "Allocation failed");
++			goto error;
++		}
++		int regions_len = 0;
++		for (int i = 0; i < rects_len; i++) {
++			int x1 = rects[i].x1 < 0 ? 0 : rects[i].x1;
++			int y1 = rects[i].y1 < 0 ? 0 : rects[i].y1;
++			int x2 = rects[i].x2 > width ? width : rects[i].x2;
++			int y2 = rects[i].y2 > height ? height : rects[i].y2;
++			if (x2 <= x1 || y2 <= y1) {
++				continue;
++			}
++			regions[regions_len++] = (VkImageCopy){
++				.srcSubresource = {
++					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++					.layerCount = 1,
++				},
++				.srcOffset = { x1, y1, 0 },
++				.dstSubresource = {
++					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++					.layerCount = 1,
++				},
++				.dstOffset = { x1, y1, 0 },
++				.extent = { x2 - x1, y2 - y1, 1 },
++			};
++		}
++		if (regions_len > 0) {
++			vkCmdCopyImage(render_cb->vk,
++				render_buffer->copy_image, VK_IMAGE_LAYOUT_GENERAL,
++				render_buffer->image, VK_IMAGE_LAYOUT_GENERAL,
++				regions_len, regions);
++		}
++		free(regions);
++	}
++
+ 	// insert acquire and release barriers for dmabuf-images
+ 	uint32_t barrier_count = wl_list_length(&renderer->foreign_textures) + 1;
+ 	VkImageMemoryBarrier *acquire_barriers = calloc(barrier_count, sizeof(*acquire_barriers));
+@@ -233,17 +310,54 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 			0, 0, NULL, 0, NULL, 1, &blend_acq_barrier);
+ 	}
+ 
++	if (render_buffer->copy_image) {
++		// The copy image is in the GENERAL layout (like the DMA-BUF image it
++		// replaces in the render pass); wait for last frame's copy to finish
++		// reading it before rendering into it again
++		VkImageLayout copy_src_layout = VK_IMAGE_LAYOUT_GENERAL;
++		if (!render_buffer->copy_transitioned) {
++			copy_src_layout = VK_IMAGE_LAYOUT_UNDEFINED;
++			render_buffer->copy_transitioned = true;
++		}
++		VkImageMemoryBarrier copy_acq_barrier = {
++			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++			.image = render_buffer->copy_image,
++			.oldLayout = copy_src_layout,
++			.newLayout = VK_IMAGE_LAYOUT_GENERAL,
++			.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
++			.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
++				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++			.subresourceRange = {
++				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++				.layerCount = 1,
++				.levelCount = 1,
++			},
++		};
++		vkCmdPipelineBarrier(stage_cb->vk, VK_PIPELINE_STAGE_TRANSFER_BIT,
++			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++			0, 0, NULL, 0, NULL, 1, &copy_acq_barrier);
++	}
++
++	// WLR_VK_NO_FOREIGN: no ownership transfer of the render buffer
++	uint32_t rb_foreign = renderer->no_foreign ?
++		VK_QUEUE_FAMILY_IGNORED : VK_QUEUE_FAMILY_FOREIGN_EXT;
++	uint32_t rb_family = renderer->no_foreign ?
++		VK_QUEUE_FAMILY_IGNORED : renderer->dev->queue_family;
++
+ 	// acquire render buffer before rendering
+ 	acquire_barriers[idx] = (VkImageMemoryBarrier){
+ 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+-		.dstQueueFamilyIndex = renderer->dev->queue_family,
++		.srcQueueFamilyIndex = rb_foreign,
++		.dstQueueFamilyIndex = rb_family,
+ 		.image = render_buffer->image,
+ 		.oldLayout = src_layout,
+ 		.newLayout = VK_IMAGE_LAYOUT_GENERAL,
+ 		.srcAccessMask = 0, // ignored anyways
+ 		.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
++			(render_buffer->copy_image ? VK_ACCESS_TRANSFER_WRITE_BIT : 0),
+ 		.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+ 		.subresourceRange.layerCount = 1,
+ 		.subresourceRange.levelCount = 1,
+@@ -252,13 +366,14 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 	// release render buffer after rendering
+ 	release_barriers[idx] = (VkImageMemoryBarrier){
+ 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+-		.srcQueueFamilyIndex = renderer->dev->queue_family,
+-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
++		.srcQueueFamilyIndex = rb_family,
++		.dstQueueFamilyIndex = rb_foreign,
+ 		.image = render_buffer->image,
+ 		.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+ 		.newLayout = VK_IMAGE_LAYOUT_GENERAL,
+ 		.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
++			(render_buffer->copy_image ? VK_ACCESS_TRANSFER_WRITE_BIT : 0),
+ 		.dstAccessMask = 0, // ignored anyways
+ 		.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+ 		.subresourceRange.layerCount = 1,
+@@ -268,10 +383,13 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 	++idx;
+ 
+ 	vkCmdPipelineBarrier(stage_cb->vk, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+-		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
++		(render_buffer->copy_image ? VK_PIPELINE_STAGE_TRANSFER_BIT : 0),
+ 		0, 0, NULL, 0, NULL, barrier_count, acquire_barriers);
+ 
+-	vkCmdPipelineBarrier(render_cb->vk, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
++	vkCmdPipelineBarrier(render_cb->vk,
++		render_buffer->copy_image ? VK_PIPELINE_STAGE_ALL_COMMANDS_BIT :
++			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+ 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL,
+ 		barrier_count, release_barriers);
+ 
+@@ -380,6 +498,13 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 
+ 	free(render_wait);
+ 
++	if (renderer->finish) {
++		res = vkQueueWaitIdle(renderer->dev->queue);
++		if (res != VK_SUCCESS) {
++			wlr_vk_error("vkQueueWaitIdle", res);
++		}
++	}
++
+ 	struct wlr_vk_shared_buffer *stage_buf, *stage_buf_tmp;
+ 	wl_list_for_each_safe(stage_buf, stage_buf_tmp, &renderer->stage.buffers, link) {
+ 		if (stage_buf->allocs.size == 0) {
+@@ -415,7 +540,7 @@ error:
+ 
+ static void render_pass_mark_box_updated(struct wlr_vk_render_pass *pass,
+ 		const struct wlr_box *box) {
+-	if (!pass->render_buffer->blend_image) {
++	if (!pass->render_buffer->blend_image && !pass->render_buffer->copy_image) {
+ 		return;
+ 	}
+ 
+diff --git a/render/vulkan/renderer.c b/render/vulkan/renderer.c
+index 9f54851..1d30f20 100644
+--- a/render/vulkan/renderer.c
++++ b/render/vulkan/renderer.c
+@@ -28,6 +28,7 @@
+ #include "render/vulkan/shaders/output.frag.h"
+ #include "types/wlr_buffer.h"
+ #include "types/wlr_matrix.h"
++#include "util/env.h"
+ 
+ // TODO:
+ // - simplify stage allocation, don't track allocations but use ringbuffer-like
+@@ -611,6 +612,10 @@ static void destroy_render_buffer(struct wlr_vk_render_buffer *buffer) {
+ 			buffer->blend_descriptor_set);
+ 	}
+ 
++	vkDestroyImageView(dev, buffer->copy_image_view, NULL);
++	vkDestroyImage(dev, buffer->copy_image, NULL);
++	vkFreeMemory(dev, buffer->copy_memory, NULL);
++
+ 	free(buffer);
+ }
+ 
+@@ -733,6 +738,84 @@ error:
+ 	return false;
+ }
+ 
++// WLR_VK_RENDER_COPY: an optimal-tiling image of the render buffer's format
++// that is rendered into instead of the DMA-BUF image. Some drivers (Vivante
++// VSI on i.MX8M Plus) accept a linear DMA-BUF image as color attachment but
++// never write the rendering to its memory.
++static bool setup_copy_image(struct wlr_vk_renderer *renderer,
++		struct wlr_vk_render_buffer *buffer, VkFormat format,
++		int32_t width, int32_t height) {
++	VkResult res;
++	VkDevice dev = renderer->dev->dev;
++
++	VkImageCreateInfo img_info = {
++		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++		.imageType = VK_IMAGE_TYPE_2D,
++		.format = format,
++		.mipLevels = 1,
++		.arrayLayers = 1,
++		.samples = VK_SAMPLE_COUNT_1_BIT,
++		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
++		.tiling = VK_IMAGE_TILING_OPTIMAL,
++		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
++		.extent = (VkExtent3D) { width, height, 1 },
++		.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
++	};
++	res = vkCreateImage(dev, &img_info, NULL, &buffer->copy_image);
++	if (res != VK_SUCCESS) {
++		wlr_vk_error("vkCreateImage (copy image)", res);
++		return false;
++	}
++
++	VkMemoryRequirements mem_reqs;
++	vkGetImageMemoryRequirements(dev, buffer->copy_image, &mem_reqs);
++	int mem_type_index = vulkan_find_mem_type(renderer->dev,
++		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_reqs.memoryTypeBits);
++	if (mem_type_index == -1) {
++		wlr_log(WLR_ERROR, "failed to find suitable vulkan memory type");
++		return false;
++	}
++	VkMemoryAllocateInfo mem_info = {
++		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++		.allocationSize = mem_reqs.size,
++		.memoryTypeIndex = mem_type_index,
++	};
++	res = vkAllocateMemory(dev, &mem_info, NULL, &buffer->copy_memory);
++	if (res != VK_SUCCESS) {
++		wlr_vk_error("vkAllocateMemory (copy image)", res);
++		return false;
++	}
++	res = vkBindImageMemory(dev, buffer->copy_image, buffer->copy_memory, 0);
++	if (res != VK_SUCCESS) {
++		wlr_vk_error("vkBindImageMemory (copy image)", res);
++		return false;
++	}
++
++	VkImageViewCreateInfo view_info = {
++		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
++		.image = buffer->copy_image,
++		.viewType = VK_IMAGE_VIEW_TYPE_2D,
++		.format = format,
++		.components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
++		.components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
++		.components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
++		.components.a = VK_COMPONENT_SWIZZLE_IDENTITY,
++		.subresourceRange = (VkImageSubresourceRange) {
++			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++			.baseMipLevel = 0,
++			.levelCount = 1,
++			.baseArrayLayer = 0,
++			.layerCount = 1,
++		},
++	};
++	res = vkCreateImageView(dev, &view_info, NULL, &buffer->copy_image_view);
++	if (res != VK_SUCCESS) {
++		wlr_vk_error("vkCreateImageView (copy image)", res);
++		return false;
++	}
++	return true;
++}
++
+ static struct wlr_vk_render_buffer *create_render_buffer(
+ 		struct wlr_vk_renderer *renderer, struct wlr_buffer *wlr_buffer) {
+ 	VkResult res;
+@@ -809,7 +892,15 @@ static struct wlr_vk_render_buffer *create_render_buffer(
+ 		}
+ 		attachments[attachment_count++] = buffer->blend_image_view;
+ 	}
+-	attachments[attachment_count++] = buffer->image_view;
++	if (renderer->render_copy) {
++		if (!setup_copy_image(renderer, buffer, fmt->format.vk,
++				dmabuf.width, dmabuf.height)) {
++			goto error;
++		}
++		attachments[attachment_count++] = buffer->copy_image_view;
++	} else {
++		attachments[attachment_count++] = buffer->image_view;
++	}
+ 
+ 	VkFramebufferCreateInfo fb_info = {
+ 		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+@@ -843,6 +934,9 @@ error:
+ 	vkDestroyImage(dev, buffer->blend_image, NULL);
+ 	vkFreeMemory(dev, buffer->blend_memory, NULL);
+ 	vkDestroyImageView(dev, buffer->blend_image_view, NULL);
++	vkDestroyImageView(dev, buffer->copy_image_view, NULL);
++	vkDestroyImage(dev, buffer->copy_image, NULL);
++	vkFreeMemory(dev, buffer->copy_memory, NULL);
+ 
+ 	vkDestroyFramebuffer(dev, buffer->framebuffer, NULL);
+ 	vkDestroyImageView(dev, buffer->image_view, NULL);
+@@ -2780,6 +2874,11 @@ struct wlr_renderer *vulkan_renderer_create_for_device(struct wlr_vk_device *dev
+ 	}
+ 
+ 	renderer->dev = dev;
++	renderer->render_copy = env_parse_bool("WLR_VK_RENDER_COPY");
++	renderer->no_foreign = env_parse_bool("WLR_VK_NO_FOREIGN");
++	renderer->finish = env_parse_bool("WLR_RENDERER_FINISH");
++	wlr_log(WLR_INFO, "Vulkan renderer options: render-copy=%d no-foreign=%d finish=%d",
++		renderer->render_copy, renderer->no_foreign, renderer->finish);
+ 	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl);
+ 	wl_list_init(&renderer->stage.buffers);
+ 	wl_list_init(&renderer->foreign_textures);
+diff --git a/render/vulkan/texture.c b/render/vulkan/texture.c
+index 65ea22b..675ce40 100644
+--- a/render/vulkan/texture.c
++++ b/render/vulkan/texture.c
+@@ -545,7 +545,9 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
+ 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+ 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+ 		.extent = (VkExtent3D) { attribs->width, attribs->height, 1 },
+-		.usage = for_render ? vulkan_render_usage : vulkan_dma_tex_usage,
++		.usage = for_render ? vulkan_render_usage |
++			(renderer->render_copy ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0) :
++			vulkan_dma_tex_usage,
+ 	};
+ 	if (disjoint) {
+ 		img_info.flags = VK_IMAGE_CREATE_DISJOINT_BIT;
+-- 
+2.34.1
+

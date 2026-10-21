@@ -1,0 +1,78 @@
+From 404c51197ec5e43dfdf21732a7d0d04117b939f6 Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 10:48:32 -0400
+Subject: [PATCH 3/4] gles2: add WLR_RENDERER_FINISH to wait for the GPU after
+ each frame
+
+On drivers that don't attach implicit-sync fences to the rendered DMA-BUF
+(Vivante on i.MX8M Plus), the display can scan out a buffer before the
+GPU has finished rendering it, which shows up as black or stale
+rectangles in regions that are being redrawn. With WLR_RENDERER_FINISH
+set, the render pass ends with glFinish() instead of glFlush().
+---
+ include/render/gles2.h  | 2 ++
+ render/gles2/pass.c     | 9 ++++++++-
+ render/gles2/renderer.c | 5 +++++
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/include/render/gles2.h b/include/render/gles2.h
+index 930cf07..490e992 100644
+--- a/include/render/gles2.h
++++ b/include/render/gles2.h
+@@ -43,6 +43,8 @@ struct wlr_gles2_renderer {
+ 	float projection[9];
+ 	struct wlr_egl *egl;
+ 	int drm_fd;
++	// Wait for the GPU at the end of each render pass (WLR_RENDERER_FINISH)
++	bool finish;
+ 
+ 	const char *exts_str;
+ 	struct {
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index 768e81d..149efff 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -36,7 +36,14 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 		clock_gettime(CLOCK_MONOTONIC, &timer->cpu_end);
+ 	}
+ 
+-	glFlush();
++	// Without an implicit-sync fence from the driver (Vivante), the display
++	// can scan out a buffer the GPU hasn't finished rendering. glFinish()
++	// makes the buffer complete before it is committed.
++	if (renderer->finish) {
++		glFinish();
++	} else {
++		glFlush();
++	}
+ 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+ 
+ 	pop_gles2_debug(renderer);
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index 4899cfc..59681d9 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -20,6 +20,7 @@
+ #include "render/gles2.h"
+ #include "render/pixel_format.h"
+ #include "types/wlr_matrix.h"
++#include "util/env.h"
+ #include "util/time.h"
+ 
+ #include "common_vert_src.h"
+@@ -838,8 +839,12 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 	renderer->egl = egl;
+ 	renderer->exts_str = exts_str;
+ 	renderer->drm_fd = -1;
++	renderer->finish = env_parse_bool("WLR_RENDERER_FINISH");
+ 
+ 	wlr_log(WLR_INFO, "Creating GLES2 renderer");
++	if (renderer->finish) {
++		wlr_log(WLR_INFO, "WLR_RENDERER_FINISH set: waiting for the GPU after each frame");
++	}
+ 	wlr_log(WLR_INFO, "Using %s", glGetString(GL_VERSION));
+ 	wlr_log(WLR_INFO, "GL vendor: %s", glGetString(GL_VENDOR));
+ 	wlr_log(WLR_INFO, "GL renderer: %s", glGetString(GL_RENDERER));
+-- 
+2.34.1
+

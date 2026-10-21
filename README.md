@@ -30,12 +30,12 @@ used as the base for GUI- and machine-learning-heavy applications.
 
 ## Download and install
 
-**Pre-release v0.1.0:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar)** (458 MB)
+**Pre-release v0.1.1:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar)** (458 MB)
 
-SHA-256: `82f21cb2bb0cf0deb3c289cfc1fd5d975e39eba1d5e3412a8ba8ea3e8ad27d3c`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.0),
+SHA-256: `ad353d00300addf8097019eadc83bdb23e64d2847c741b131172e95e1abde721`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.1),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -43,7 +43,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -128,8 +128,9 @@ ssh argos_user@<board-ip>
 ssh alakai_admin@<board-ip>
 ```
 
-The hostname is `verdin-imx8mp-<serial-number>`, and mDNS is enabled, so
-`ssh argos_user@verdin-imx8mp-<serial-number>.local` also works.
+The hostname is `argos-<serial-number>` (for example `argos-15629353`), and mDNS is enabled, so
+`ssh argos_user@argos-<serial-number>.local` also works. The prefix is set with
+`LABWC_DEMO_HOSTNAME_PREFIX` in `layers/meta-labwc-demo/conf/layer.conf`.
 
 > **Change both passwords** (`passwd`) before connecting the board to anything other than a lab
 > network.
@@ -180,16 +181,29 @@ a renderer that crashes, hangs or reports errors during startup is skipped until
 | `gles2` | OpenGL ES 2 on the display device (the way Weston uses the GPU); the default |
 | `gles2-render` | OpenGL ES 2 on the GPU render node |
 | `pixman` | Software rendering on the CPU (slow; last resort) |
-| `vulkan` | Vulkan on the GPU. **Experimental, not used by default:** wlroots 0.17's Vulkan renderer starts on the Vivante driver, but the screen stays black |
+| `vulkan-auto` | Vulkan, in whichever mode `vk-scanout-test` finds working (below); skipped if none works |
+| `vulkan` | Vulkan, rendering directly into the display buffers (black screen in v0.1.0) |
+| `vulkan-copy` | Vulkan, rendering into a GPU image that is copied into the display buffer |
+| `vulkan-noforeign` | Vulkan without the queue ownership transfers of the display buffers |
 
-The renderer in use is shown by `labwc-hwaccel-check` and in the desktop log
-(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). To change the order, set for
-example `LABWC_RENDERERS="vulkan gles2 pixman"` in `/etc/default/labwc` and run
-`sudo systemctl restart labwc`. Applications can still use Vulkan themselves; this only concerns
-how the desktop draws.
+The Vulkan strategies are **experimental and not used by default** (wlroots 0.17's Vulkan
+renderer is experimental itself). The renderer in use is shown by `labwc-hwaccel-check` and in the
+desktop log (`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). To try Vulkan, set
+`LABWC_RENDERERS="vulkan-auto gles2 pixman"` in `/etc/default/labwc` and run
+`sudo systemctl restart labwc`. Applications can use Vulkan in any case; this only concerns how
+the desktop draws.
 
-`sudo labwc-gpu-probe` starts labwc once per renderer (off-screen, the desktop keeps running) and
-prints which ones start, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` tests
+All GPU strategies wait for the GPU to finish each frame before it is shown. The Vivante driver
+doesn't give the display the fence it would need to wait by itself; without the wait, areas that
+are being redrawn (for example a running `htop`) can flash black. `LABWC_RENDER_FINISH=0` in
+`/etc/default/labwc` turns the wait off.
+
+`vk-scanout-test` (no root needed, the desktop can keep running) writes white into a display buffer
+with different Vulkan operations and reads the memory back. It shows which operations really reach
+the display on this driver and which `vulkan*` strategy fits.
+
+`sudo labwc-gpu-probe` runs `vk-scanout-test`, then starts labwc once per renderer (off-screen,
+the desktop keeps running) and prints which ones start, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` tests
 them on the real displays: it shows a white test window with each renderer and asks whether you
 saw it (the desktop is stopped for about a minute).
 

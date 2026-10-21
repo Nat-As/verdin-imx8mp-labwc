@@ -8,6 +8,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI += " \
     file://0001-egl-add-WLR_EGL_SKIP_DEVICE-and-log-EGL-setup-steps.patch \
     file://0002-vulkan-support-drivers-without-VK_EXT_physical_devic.patch \
+    file://0003-gles2-add-WLR_RENDERER_FINISH-to-wait-for-the-GPU-af.patch \
+    file://0004-vulkan-add-render-copy-no-foreign-and-finish-driver-.patch \
 "
 
 PACKAGECONFIG:append = " opengl gbm vulkan"

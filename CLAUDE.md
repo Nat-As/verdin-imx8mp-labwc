@@ -76,6 +76,15 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   OK, outputs enabled, no errors) but the screen stays black, which the session can't detect
   (v0.1.0 rev 1). Stock wlroots EGL (`gles2-device`) segfaults in Vivante's
   `eglQueryDevicesEXT()` (gdb-confirmed).
+- v0.1.1 wlroots patches 0003/0004: `WLR_RENDERER_FINISH` (glFinish / vkQueueWaitIdle per frame;
+  set by labwc-session, fixes black flashes in redrawn areas: Vivante gives no implicit-sync
+  fence), `WLR_VK_RENDER_COPY` (render into an optimal image, vkCmdCopyImage of the updated region
+  into the DMA-BUF), `WLR_VK_NO_FOREIGN`. Strategies `vulkan-copy`, `vulkan-noforeign`,
+  `vulkan-auto` (uses `vk-scanout-test -q`: direct/copy/none). `vk-scanout-test` (C, in
+  labwc-demo-gpu-tools) imports a linear GBM scanout BO into Vulkan and checks which write
+  methods reach memory; all OK on Intel/Mesa (validated on the build host).
+- Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
+  (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
   (HDMI-A-1, LVDS-1 via the DSI-to-LVDS bridge of the 7" display). The 7" panel output always
   reports connected; `labwc-demo-outputs` turns it off when the touch controller (I2C 1-0041)
