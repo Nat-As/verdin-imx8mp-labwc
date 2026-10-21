@@ -70,8 +70,12 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   (`recipes-wlroots/wlroots/files/`): `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead of the
   EGL device lookup that crashed labwc with SIGSEGV on Vivante in v0.0.3) and Vulkan support for
   drivers without `VK_EXT_physical_device_drm` (Vivante VSI). `labwc-session` tries the
-  strategies in `LABWC_RENDERERS` (default `vulkan gles2 gles2-render pixman`) and falls back on a
-  crash or renderer errors in the first 20 s; state in `/tmp/labwc-session-<uid>/`.
+  strategies in `LABWC_RENDERERS` (default `gles2 gles2-render pixman`) and falls back on a
+  crash, renderer errors in the first 20 s or no client response in 45 s; state in
+  `/tmp/labwc-session-<uid>/`. **Vulkan is opt-in only**: on hardware it starts cleanly (modeset
+  OK, outputs enabled, no errors) but the screen stays black, which the session can't detect
+  (v0.1.0 rev 1). Stock wlroots EGL (`gles2-device`) segfaults in Vivante's
+  `eglQueryDevicesEXT()` (gdb-confirmed).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
   (HDMI-A-1, LVDS-1 via the DSI-to-LVDS bridge of the 7" display). The 7" panel output always
   reports connected; `labwc-demo-outputs` turns it off when the touch controller (I2C 1-0041)

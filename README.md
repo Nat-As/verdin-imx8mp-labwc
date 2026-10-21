@@ -7,7 +7,7 @@
 
 A Yocto image, built from source on the Toradex BSP 7.7.0, that boots a **Verdin iMX8M Plus** on
 the **Mallow** carrier board straight into a minimal **labwc** Wayland desktop. labwc runs directly
-on DRM/KMS, with no X11 or Xwayland, and renders on the GPU (Vulkan or OpenGL ES). The desktop
+on DRM/KMS, with no X11 or Xwayland, and renders on the GPU (OpenGL ES). The desktop
 shows on the **Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enabled) and on HDMI.
 
 The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (Vulkan, OpenGL ES,
@@ -16,7 +16,7 @@ used as the base for GUI- and machine-learning-heavy applications.
 
 | | Included |
 |---|---|
-| Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (Vulkan or GLES2), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
+| Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (OpenGL ES), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
 | GPU | Vivante GC7000UL: Vulkan, OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `vulkaninfo`, `clinfo`, `glmark2`, `gmem_info` |
 | NPU | 2.3 TOPS NPU: OpenVX with NN extensions, RapidOpenVX, TIM-VX, TensorFlow Lite 2.16 (C++ and Python `tflite_runtime`) with the VX delegate |
 | Video | Hantro VPU (H.264/H.265/VP9 decode, H.264/H.265 encode) with GStreamer plugins |
@@ -33,7 +33,7 @@ used as the base for GUI- and machine-learning-heavy applications.
 **Pre-release v0.1.0:**
 **[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar)** (458 MB)
 
-SHA-256: `4030d71c359d1484022a803ef39efa0ef0923c60469159171f59d79608f1e991`
+SHA-256: `82f21cb2bb0cf0deb3c289cfc1fd5d975e39eba1d5e3412a8ba8ea3e8ad27d3c`
 ([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.0.tar.sha256),
 [release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.0),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
@@ -173,23 +173,25 @@ sudo labwc-hwaccel-check        # add -q to skip the NPU benchmark
 ```
 
 **Desktop renderer.** labwc tries these renderers in order and uses the first one that works;
-a renderer that crashes or reports errors during startup is skipped until the next reboot:
+a renderer that crashes, hangs or reports errors during startup is skipped until the next reboot:
 
 | Strategy | Renderer |
 |---|---|
-| `vulkan` | Vulkan on the GPU |
-| `gles2` | OpenGL ES 2 on the display device (the way Weston uses the GPU) |
+| `gles2` | OpenGL ES 2 on the display device (the way Weston uses the GPU); the default |
 | `gles2-render` | OpenGL ES 2 on the GPU render node |
 | `pixman` | Software rendering on the CPU (slow; last resort) |
+| `vulkan` | Vulkan on the GPU. **Experimental, not used by default:** wlroots 0.17's Vulkan renderer starts on the Vivante driver, but the screen stays black |
 
 The renderer in use is shown by `labwc-hwaccel-check` and in the desktop log
-(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). To change the order, for
-example to prefer OpenGL ES, set `LABWC_RENDERERS="gles2 gles2-render vulkan pixman"` in
-`/etc/default/labwc` and run `sudo systemctl restart labwc`.
+(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). To change the order, set for
+example `LABWC_RENDERERS="vulkan gles2 pixman"` in `/etc/default/labwc` and run
+`sudo systemctl restart labwc`. Applications can still use Vulkan themselves; this only concerns
+how the desktop draws.
 
 `sudo labwc-gpu-probe` starts labwc once per renderer (off-screen, the desktop keeps running) and
-prints which ones work, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` does the
-same on the real displays (the desktop is stopped for about a minute).
+prints which ones start, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` tests
+them on the real displays: it shows a white test window with each renderer and asks whether you
+saw it (the desktop is stopped for about a minute).
 
 **NPU.** TensorFlow Lite models run on the NPU through the VX delegate
 (`/usr/lib/libvx_delegate.so`):
@@ -237,10 +239,10 @@ After a desktop configuration change, select **Restart session** in the desktop 
 System commands below need `sudo`, so run them as `alakai_admin`.
 
 - **Show the desktop log:** `sudo journalctl -b -t labwc`
-- **Black or garbled screen, or windows drawn wrong:** try the next renderer. Add
-  `LABWC_RENDERERS="gles2 gles2-render pixman"` (or `WLR_RENDERER=pixman` for software rendering)
-  to `/etc/default/labwc`, then run `sudo systemctl restart labwc`. Please report it with the
-  output of `sudo labwc-gpu-probe`.
+- **Black or garbled screen, or windows drawn wrong:** find a renderer that shows a picture with
+  `sudo labwc-gpu-probe --kms`, then set it in `/etc/default/labwc`, for example
+  `LABWC_RENDERERS="gles2-render pixman"` (or `WLR_RENDERER=pixman` for software rendering), and run
+  `sudo systemctl restart labwc`. Please report the probe output.
 - **The 7" display stays dark:** `labwc-hwaccel-check` reports `touch FAIL` when the display does
   not answer on I2C (kernel log: `sn65dsi83 ... failed to lock PLL` and
   `ilitek_ts ... protocol init failed`). Check the display's FFC cable and power. While the display

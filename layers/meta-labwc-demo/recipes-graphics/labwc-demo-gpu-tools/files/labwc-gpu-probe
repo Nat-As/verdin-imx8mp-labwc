@@ -6,8 +6,9 @@
 #   sudo labwc-gpu-probe                 headless test of all strategies (the
 #                                        desktop keeps running)
 #   sudo labwc-gpu-probe --kms           test on the real displays: stops the
-#                                        desktop, shows each strategy for a few
-#                                        seconds, then restarts the desktop
+#                                        desktop, shows a white test window
+#                                        with each strategy, asks whether it
+#                                        was visible, then restarts the desktop
 #   sudo labwc-gpu-probe vulkan gles2    test only these strategies
 #
 # Strategies are the ones of labwc-session (/etc/default/labwc):
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(vulkan gles2 gles2-render gles2-device pixman)
+[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan gles2-device pixman)
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "labwc-gpu-probe: run as root (sudo labwc-gpu-probe)" >&2
@@ -112,8 +113,10 @@ for s in "${STRATEGIES[@]}"; do
     fi
     log=$outdir/$s.log
     echo "== $s ($envs)"
-    # Test client: a foot window running for a few seconds, then exit labwc
-    startup="sh -c 'foot -e sh -c \"echo labwc-gpu-probe: $s; sleep $((SECONDS_PER_TEST - 2))\" & sleep $SECONDS_PER_TEST; labwc --exit'"
+    # Test client: a white foot window for a few seconds (easy to tell from a
+    # black screen), then exit labwc
+    startup="sh -c 'foot -o colors.background=ffffff -o colors.foreground=000000 -e sh -c \"echo labwc-gpu-probe: renderer $s; sleep $((SECONDS_PER_TEST - 2))\" & sleep $SECONDS_PER_TEST; labwc --exit'"
+    [ "$KMS" = 1 ] && echo "   watch the display: a white terminal window should appear for ${SECONDS_PER_TEST}s"
     cmd=(labwc -C "$cfg" -V -s "$startup")
     if [ "$have_gdb" = 1 ]; then
         cmd=(gdb -q -batch
@@ -158,6 +161,14 @@ for s in "${STRATEGIES[@]}"; do
         result[$s]="FAILED (${code:-exit $rc})"
         echo "   -> FAILED (${code:-exit $rc}). Errors:"
         grep -E "\[ERROR\]|error|Failed|failed" "$log" | grep -v "^$" | tail -n 10 | sed 's/^/      /'
+    fi
+    # Only a person can tell whether the picture reached the display
+    if [ "$KMS" = 1 ] && [ -t 0 ] && [[ ${result[$s]} == OK* || ${result[$s]} == RAN* ]]; then
+        read -r -p "   Was the white window visible on the display? [y/n] " seen
+        case $seen in
+        y*|Y*) result[$s]="${result[$s]}, window visible" ;;
+        *)     result[$s]="${result[$s]}, NOT visible (black screen)" ;;
+        esac
     fi
     echo
     sleep 1

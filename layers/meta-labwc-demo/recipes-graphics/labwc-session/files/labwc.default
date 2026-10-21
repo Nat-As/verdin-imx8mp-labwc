@@ -1,16 +1,18 @@
 # Environment for labwc.service (read by systemd, then by labwc-session).
 # Apply changes with: sudo systemctl restart labwc
 #
-# Renderer: labwc-session tries these GPU renderer strategies in order and
-# falls back to the next one if labwc crashes or logs renderer errors during
+# Renderer: labwc-session tries these renderer strategies in order and falls
+# back to the next one if labwc crashes, hangs or logs renderer errors during
 # startup (see /usr/bin/labwc-session):
-#   vulkan        Vulkan renderer on the Vivante GPU
 #   gles2         OpenGL ES 2 renderer on the display device (as Weston does)
 #   gles2-render  OpenGL ES 2 renderer on the GPU render node
 #   pixman        software rendering on the CPU (slow, always works)
-# Check which one is in use with labwc-hwaccel-check. To prefer GLES2 over
-# Vulkan (for example if windows look wrong with Vulkan):
-#LABWC_RENDERERS="gles2 gles2-render vulkan pixman"
+#   vulkan        Vulkan renderer on the Vivante GPU. EXPERIMENTAL, not used
+#                 by default: on the i.MX8MP the screen stays black with it.
+# Default order:
+#LABWC_RENDERERS="gles2 gles2-render pixman"
+# Check which one is in use with labwc-hwaccel-check, and which ones show a
+# picture with: sudo labwc-gpu-probe --kms
 #
 # Or force a single wlroots renderer (no fallback): gles2, vulkan or pixman.
 #WLR_RENDERER=pixman

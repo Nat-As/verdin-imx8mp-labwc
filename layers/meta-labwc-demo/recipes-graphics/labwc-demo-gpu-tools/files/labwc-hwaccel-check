@@ -113,6 +113,7 @@ if ctx:
     vx.vxReleaseContext(ctypes.byref(ctypes.c_void_p(ctx)))
 EOF
 )
+    ovx=$(echo "$ovx" | tail -n1)
     [ "$ovx" = ok ] && PASS "openvx" "vxCreateContext() works (libOpenVX)" \
         || FAIL "openvx" "vxCreateContext() failed: ${ovx:-crashed}"
 else
@@ -159,6 +160,8 @@ if r == 0:
     lib.g2d_close(h)
 EOF
 )
+    # The G2D library prints OpenCL kernel build messages on stdout
+    g2d=$(echo "$g2d" | tail -n1)
     [ "$g2d" = ok ] && PASS "g2d" "g2d_open() works" || FAIL "g2d" "g2d_open() failed: ${g2d:-crashed}"
 else
     FAIL "g2d" "libg2d not installed"
