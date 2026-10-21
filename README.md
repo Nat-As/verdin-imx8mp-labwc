@@ -30,12 +30,12 @@ used as the base for GUI- and machine-learning-heavy applications.
 
 ## Download and install
 
-**Pre-release v0.1.1:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar)** (458 MB)
+**Pre-release v0.1.2:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar)** (458 MB)
 
-SHA-256: `ad353d00300addf8097019eadc83bdb23e64d2847c741b131172e95e1abde721`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.1),
+SHA-256: `8e679b5edfa48fb1c14a0c11e99554bccec88609e92fdae1261d52a000972546`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.2),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -43,7 +43,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.1.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -182,8 +182,9 @@ a renderer that crashes, hangs or reports errors during startup is skipped until
 | `gles2-render` | OpenGL ES 2 on the GPU render node |
 | `pixman` | Software rendering on the CPU (slow; last resort) |
 | `vulkan-auto` | Vulkan, in whichever mode `vk-scanout-test` finds working (below); skipped if none works |
-| `vulkan` | Vulkan, rendering directly into the display buffers (black screen in v0.1.0) |
-| `vulkan-copy` | Vulkan, rendering into a GPU image that is copied into the display buffer |
+| `vulkan-buffer` | Vulkan, rendering into a GPU image that is copied into the display memory as plain bytes (through a `VkBuffer`), so it arrives in the linear layout the display reads |
+| `vulkan` | Vulkan, rendering directly into the display buffers (black or scrambled screen on this board) |
+| `vulkan-copy` | Vulkan, rendering into a GPU image that is copied into the display buffer image |
 | `vulkan-noforeign` | Vulkan without the queue ownership transfers of the display buffers |
 
 The Vulkan strategies are **experimental and not used by default** (wlroots 0.17's Vulkan
@@ -198,9 +199,10 @@ doesn't give the display the fence it would need to wait by itself; without the 
 are being redrawn (for example a running `htop`) can flash black. `LABWC_RENDER_FINISH=0` in
 `/etc/default/labwc` turns the wait off.
 
-`vk-scanout-test` (no root needed, the desktop can keep running) writes white into a display buffer
-with different Vulkan operations and reads the memory back. It shows which operations really reach
-the display on this driver and which `vulkan*` strategy fits.
+`vk-scanout-test` (no root needed, the desktop can keep running) writes into display buffers with
+different Vulkan operations and reads the memory back the way the display controller sees it. A
+position-encoding pattern shows not only whether the data arrived but also whether it landed in the
+wrong layout (tiled). The result says which `vulkan*` strategy fits; `-v` prints sample pixels.
 
 `sudo labwc-gpu-probe` runs `vk-scanout-test`, then starts labwc once per renderer (off-screen,
 the desktop keeps running) and prints which ones start, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` tests

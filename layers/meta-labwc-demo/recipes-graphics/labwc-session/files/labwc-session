@@ -18,9 +18,14 @@
 #                 into the display buffer (WLR_VK_RENDER_COPY=1)
 #   vulkan-noforeign  Vulkan without queue ownership transfers
 #                 (WLR_VK_NO_FOREIGN=1)
+#   vulkan-buffer Vulkan, rendering into a GPU-private image that is copied
+#                 into the display buffer's memory through a VkBuffer, so it
+#                 lands in the linear layout the display reads
+#                 (WLR_VK_RENDER_BUFFER=1; the Vivante driver writes images in
+#                 display memory tiled)
 #   vulkan-auto   runs vk-scanout-test, which checks which Vulkan operations
-#                 reach a display buffer's memory, then uses vulkan or
-#                 vulkan-copy accordingly, or is skipped
+#                 reach a display buffer's memory correctly, then uses vulkan,
+#                 vulkan-copy or vulkan-buffer accordingly, or is skipped
 #   gles2-device  GLES2 with wlroots' EGL device lookup (crashed in v0.0.3;
 #                 only for diagnosis)
 #   pixman        CPU software rendering (always works, slow)
@@ -120,6 +125,7 @@ strategy_env() {
     vulkan)       echo "WLR_RENDERER=vulkan$finish" ;;
     vulkan-copy)  echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
     vulkan-noforeign) echo "WLR_RENDERER=vulkan WLR_VK_NO_FOREIGN=1$finish" ;;
+    vulkan-buffer) echo "WLR_RENDERER=vulkan WLR_VK_RENDER_BUFFER=1$finish" ;;
     vulkan-auto)
         mode=$(timeout 60 vk-scanout-test -q 2>/dev/null)
         case $mode in
@@ -127,6 +133,8 @@ strategy_env() {
                 echo "WLR_RENDERER=vulkan$finish" ;;
         copy)   log "vk-scanout-test: Vulkan needs render-copy mode" >&2
                 echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
+        buffer) log "vk-scanout-test: Vulkan needs render-buffer mode" >&2
+                echo "WLR_RENDERER=vulkan WLR_VK_RENDER_BUFFER=1$finish" ;;
         *)      log "vk-scanout-test: no Vulkan mode reaches the display buffers (${mode:-test failed})" >&2
                 return 1 ;;
         esac ;;

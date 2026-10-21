@@ -1,17 +1,23 @@
 // vk-scanout-test: check which Vulkan operations really write to a display
-// (scanout) buffer on this GPU driver.
+// (scanout) buffer on this GPU driver, and in which memory layout.
 //
-// A linear GBM buffer object, allocated the way the wlroots DRM backend
-// allocates its scanout buffers, is filled with a sentinel value, imported
-// into Vulkan as a DMA-BUF image (like wlroots' Vulkan renderer does), and
-// then written with white using different Vulkan operations. After each one
-// the buffer's memory is read back through the DMA-BUF mapping, i.e. the way
-// the display controller sees it.
+// Display buffers are allocated on the display (KMS) device in two ways:
+//  - dumb: a DRM dumb buffer. Its CPU mapping is uncached (write-combined),
+//    so reading it back shows exactly what the display controller scans out.
+//  - gbm:  a linear GBM buffer object, as the wlroots DRM backend allocates
+//    them. Its CPU mapping may be cached by the GPU driver, so a readback can
+//    show stale data on some drivers.
+// Each buffer is filled with a sentinel, imported into Vulkan the way the
+// wlroots Vulkan renderer imports it (or bound to a VkBuffer), written with
+// one of several Vulkan operations, and read back. ARGB8888 (UNORM) tests
+// write a pattern that encodes each pixel's position, so a buffer written in
+// a tiled layout is reported as such instead of as a generic failure.
 //
-// Usage: vk-scanout-test [-d /dev/dri/cardN] [-s WIDTHxHEIGHT] [-q]
-//   -q  print only the recommended wlroots Vulkan mode:
-//       "direct" (renders into the buffer), "copy" (WLR_VK_RENDER_COPY=1),
-//       or "none"
+// Usage: vk-scanout-test [-d /dev/dri/cardN] [-s WIDTHxHEIGHT] [-q] [-v]
+//   -q  print only the recommended wlroots Vulkan mode: "direct" (renders
+//       into the display buffer), "copy" (WLR_VK_RENDER_COPY=1), "buffer"
+//       (WLR_VK_RENDER_BUFFER=1) or "none"
+//   -v  print sample pixels of failed tests
 // Exit status: 0 if a working mode was found, 1 if not, 2 on setup errors.
 
 #define _GNU_SOURCE
@@ -34,10 +40,11 @@
 
 #include "fill_vert.h"
 #include "fill_frag.h"
+#include "pattern_frag.h"
 
 #define SENTINEL 0x11223344u
 
-static bool quiet;
+static bool quiet, verbose;
 #define info(...) do { if (!quiet) printf(__VA_ARGS__); } while (0)
 
 struct vk {
@@ -51,29 +58,38 @@ struct vk {
 	PFN_vkGetMemoryFdPropertiesKHR get_memory_fd_properties;
 };
 
-struct bo {
-	struct gbm_bo *gbm;
-	int fd;
+enum kind { DUMB, GBM };
+
+struct scanout {
+	enum kind kind;
+	int kms_fd;
+	int fd; // DMA-BUF
 	uint32_t width, height, stride, offset;
 	uint64_t modifier;
 	uint32_t *map;
 	size_t map_size;
+	struct gbm_bo *bo;
+	uint32_t dumb_handle;
 };
 
 struct target {
 	VkImage image;
+	VkBuffer buffer;
 	VkDeviceMemory memory;
 	VkImageView view;
 };
 
 enum method {
-	M_DRAW,          // wlroots: draw into the DMA-BUF image, FOREIGN barriers
-	M_DRAW_NOFOREIGN,// same without queue family ownership transfers
-	M_CLEAR_PASS,    // render pass with loadOp CLEAR
-	M_CLEAR_CMD,     // vkCmdClearColorImage
-	M_DRAW_COPY,     // draw into an optimal image, vkCmdCopyImage (WLR_VK_RENDER_COPY)
-	M_DRAW_BLIT,     // draw into an optimal image, vkCmdBlitImage
-	M_BUFFER_COPY,   // vkCmdCopyBufferToImage from a host buffer
+	M_DRAW,           // wlroots default: draw into the DMA-BUF image
+	M_DRAW_NOFOREIGN, // same without queue family ownership transfers
+	M_CLEAR_PASS,     // render pass with loadOp CLEAR
+	M_CLEAR_CMD,      // vkCmdClearColorImage
+	M_DRAW_COPY,      // draw into an optimal image, vkCmdCopyImage (WLR_VK_RENDER_COPY)
+	M_DRAW_BLIT,      // draw into an optimal image, vkCmdBlitImage
+	M_BUFFER_COPY,    // vkCmdCopyBufferToImage from a host buffer
+	M_LINEAR_DRAW,    // DMA-BUF imported with VK_IMAGE_TILING_LINEAR, draw
+	M_TO_BUFFER,      // draw into an optimal image, vkCmdCopyImageToBuffer into
+	                  // a VkBuffer bound to the DMA-BUF (WLR_VK_RENDER_BUFFER)
 	M_COUNT,
 };
 
@@ -84,8 +100,12 @@ static const char *method_names[M_COUNT] = {
 	"vkCmdClearColorImage",
 	"draw + copy (WLR_VK_RENDER_COPY)",
 	"draw + blit",
-	"buffer copy",
+	"buffer -> image copy",
+	"draw, image with LINEAR tiling",
+	"draw + copy to VkBuffer (WLR_VK_RENDER_BUFFER)",
 };
+
+enum outcome { OUT_OK, OUT_NOT_WRITTEN, OUT_TILED, OUT_WRONG, OUT_FAILED };
 
 static void check(VkResult res, const char *what) {
 	if (res != VK_SUCCESS) {
@@ -197,7 +217,7 @@ static void vk_init(struct vk *vk) {
 	check(vkCreateCommandPool(vk->dev, &pci, NULL, &vk->pool), "vkCreateCommandPool");
 }
 
-static void print_modifiers(struct vk *vk, VkFormat format, const char *name) {
+static void print_format(struct vk *vk, VkFormat format, const char *name) {
 	VkDrmFormatModifierPropertiesListEXT list = {
 		.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
 	};
@@ -209,14 +229,18 @@ static void print_modifiers(struct vk *vk, VkFormat format, const char *name) {
 	VkDrmFormatModifierPropertiesEXT *mods = calloc(list.drmFormatModifierCount + 1, sizeof(*mods));
 	list.pDrmFormatModifierProperties = mods;
 	vkGetPhysicalDeviceFormatProperties2(vk->phdev, format, &props);
-	info("%s DRM format modifiers:\n", name);
+	info("%s:\n", name);
+	VkFormatFeatureFlags lin = props.formatProperties.linearTilingFeatures;
+	info("  VK_IMAGE_TILING_LINEAR       color-attachment=%d blit-dst=%d transfer-dst=%d\n",
+		!!(lin & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT),
+		!!(lin & VK_FORMAT_FEATURE_BLIT_DST_BIT),
+		!!(lin & VK_FORMAT_FEATURE_TRANSFER_DST_BIT));
 	for (uint32_t i = 0; i < list.drmFormatModifierCount; i++) {
 		VkFormatFeatureFlags f = mods[i].drmFormatModifierTilingFeatures;
 		char *mname = drmGetFormatModifierName(mods[i].drmFormatModifier);
-		info("  %-28s color-attachment=%d blend=%d blit-dst=%d transfer-dst=%d sampled=%d\n",
+		info("  modifier %-19s color-attachment=%d blit-dst=%d transfer-dst=%d sampled=%d\n",
 			mname ? mname : "?",
 			!!(f & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT),
-			!!(f & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT),
 			!!(f & VK_FORMAT_FEATURE_BLIT_DST_BIT),
 			!!(f & VK_FORMAT_FEATURE_TRANSFER_DST_BIT),
 			!!(f & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT));
@@ -236,102 +260,261 @@ static int find_mem_type(struct vk *vk, uint32_t bits, VkMemoryPropertyFlags fla
 	return -1;
 }
 
-static bool bo_create(struct gbm_device *gbm, uint32_t format, uint32_t w, uint32_t h,
-		struct bo *bo) {
-	memset(bo, 0, sizeof(*bo));
-	uint64_t linear = DRM_FORMAT_MOD_LINEAR;
-	bo->gbm = gbm_bo_create_with_modifiers(gbm, w, h, format, &linear, 1);
-	if (bo->gbm == NULL) {
-		bo->gbm = gbm_bo_create(gbm, w, h, format,
-			GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+// --- Display buffers ------------------------------------------------------
+
+static bool scanout_create(enum kind kind, int kms_fd, struct gbm_device *gbm,
+		uint32_t format, uint32_t w, uint32_t h, struct scanout *s) {
+	memset(s, 0, sizeof(*s));
+	s->kind = kind;
+	s->kms_fd = kms_fd;
+	s->width = w;
+	s->height = h;
+	s->fd = -1;
+	if (kind == DUMB) {
+		struct drm_mode_create_dumb create = { .width = w, .height = h, .bpp = 32 };
+		if (drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) != 0) {
+			info("  dumb buffer: DRM_IOCTL_MODE_CREATE_DUMB failed: %s\n", strerror(errno));
+			return false;
+		}
+		s->dumb_handle = create.handle;
+		s->stride = create.pitch;
+		s->modifier = DRM_FORMAT_MOD_LINEAR;
+		if (drmPrimeHandleToFD(kms_fd, create.handle, DRM_CLOEXEC | DRM_RDWR, &s->fd) != 0) {
+			info("  dumb buffer: PRIME export failed: %s\n", strerror(errno));
+			return false;
+		}
+		struct drm_mode_map_dumb map = { .handle = create.handle };
+		if (drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &map) != 0) {
+			info("  dumb buffer: DRM_IOCTL_MODE_MAP_DUMB failed: %s\n", strerror(errno));
+			return false;
+		}
+		s->map_size = create.size;
+		s->map = mmap(NULL, s->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, kms_fd,
+			map.offset);
+	} else {
+		uint64_t linear = DRM_FORMAT_MOD_LINEAR;
+		s->bo = gbm_bo_create_with_modifiers(gbm, w, h, format, &linear, 1);
+		if (s->bo == NULL) {
+			s->bo = gbm_bo_create(gbm, w, h, format,
+				GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+		}
+		if (s->bo == NULL) {
+			info("  GBM buffer: gbm_bo_create failed: %s\n", strerror(errno));
+			return false;
+		}
+		s->fd = gbm_bo_get_fd(s->bo);
+		s->stride = gbm_bo_get_stride_for_plane(s->bo, 0);
+		s->offset = gbm_bo_get_offset(s->bo, 0);
+		s->modifier = gbm_bo_get_modifier(s->bo);
+		s->map_size = (size_t)s->offset + (size_t)s->stride * h;
+		s->map = mmap(NULL, s->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, s->fd, 0);
 	}
-	if (bo->gbm == NULL) {
-		fprintf(stderr, "vk-scanout-test: gbm_bo_create failed: %s\n", strerror(errno));
-		return false;
-	}
-	bo->width = w;
-	bo->height = h;
-	bo->fd = gbm_bo_get_fd(bo->gbm);
-	bo->stride = gbm_bo_get_stride_for_plane(bo->gbm, 0);
-	bo->offset = gbm_bo_get_offset(bo->gbm, 0);
-	bo->modifier = gbm_bo_get_modifier(bo->gbm);
-	bo->map_size = (size_t)bo->offset + (size_t)bo->stride * h;
-	bo->map = mmap(NULL, bo->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, bo->fd, 0);
-	if (bo->map == MAP_FAILED) {
-		fprintf(stderr, "vk-scanout-test: mmap of the DMA-BUF failed: %s\n", strerror(errno));
+	if (s->map == MAP_FAILED) {
+		info("  mmap failed: %s\n", strerror(errno));
+		s->map = NULL;
 		return false;
 	}
 	return true;
 }
 
-static void bo_sync(struct bo *bo, uint64_t flags) {
-	struct dma_buf_sync sync = { .flags = flags };
-	ioctl(bo->fd, DMA_BUF_IOCTL_SYNC, &sync);
+static void scanout_destroy(struct scanout *s) {
+	if (s->map) {
+		munmap(s->map, s->map_size);
+	}
+	if (s->fd >= 0) {
+		close(s->fd);
+	}
+	if (s->bo) {
+		gbm_bo_destroy(s->bo);
+	}
+	if (s->dumb_handle) {
+		struct drm_mode_destroy_dumb destroy = { .handle = s->dumb_handle };
+		drmIoctl(s->kms_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
+	}
 }
 
-static void bo_fill(struct bo *bo, uint32_t value) {
-	bo_sync(bo, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
-	for (uint32_t y = 0; y < bo->height; y++) {
-		uint32_t *row = (uint32_t *)((char *)bo->map + bo->offset + (size_t)y * bo->stride);
-		for (uint32_t x = 0; x < bo->width; x++) {
-			row[x] = value;
+static void scanout_sync(struct scanout *s, uint64_t flags) {
+	struct dma_buf_sync sync = { .flags = flags };
+	ioctl(s->fd, DMA_BUF_IOCTL_SYNC, &sync);
+}
+
+static uint32_t *row(struct scanout *s, uint32_t y) {
+	return (uint32_t *)((char *)s->map + s->offset + (size_t)y * s->stride);
+}
+
+static void scanout_fill(struct scanout *s, uint32_t value) {
+	scanout_sync(s, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
+	for (uint32_t y = 0; y < s->height; y++) {
+		uint32_t *r = row(s, y);
+		for (uint32_t x = 0; x < s->width; x++) {
+			r[x] = value;
 		}
 	}
-	bo_sync(bo, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
+	scanout_sync(s, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
 }
 
-// Returns the share of white pixels (RGB = 0xffffff), and the share of
-// pixels that still hold the sentinel
-static void bo_check(struct bo *bo, double *white, double *untouched, uint32_t *other) {
-	size_t n_white = 0, n_sentinel = 0, total = (size_t)bo->width * bo->height;
-	*other = 0;
-	bo_sync(bo, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
-	for (uint32_t y = 0; y < bo->height; y++) {
-		const uint32_t *row = (const uint32_t *)((const char *)bo->map + bo->offset +
-			(size_t)y * bo->stride);
-		for (uint32_t x = 0; x < bo->width; x++) {
-			if ((row[x] & 0x00ffffffu) == 0x00ffffffu) {
-				n_white++;
-			} else if (row[x] == SENTINEL) {
+// Position-encoding pattern (see pattern.frag)
+static uint32_t pattern(uint32_t x, uint32_t y) {
+	return 0xff000000u | (x & 255) << 16 | (y & 255) << 8 |
+		((x >> 8) & 15) | ((y >> 8) & 15) << 4;
+}
+
+static void decode(uint32_t w, uint32_t *x, uint32_t *y) {
+	*x = ((w >> 16) & 255) | (w & 15) << 8;
+	*y = ((w >> 8) & 255) | ((w >> 4) & 15) << 8;
+}
+
+// Analyse the buffer: the share of pixels with the expected content at their
+// place, still holding the sentinel, and (for the pattern) at the place a
+// 4x4-tiled layout would put them
+static enum outcome scanout_check(struct scanout *s, bool use_pattern, char *msg,
+		size_t msg_size) {
+	size_t total = (size_t)s->width * s->height;
+	size_t n_ok = 0, n_sentinel = 0, n_pattern = 0, n_tiled = 0;
+	uint32_t pitch = s->stride / 4;
+	scanout_sync(s, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
+	for (uint32_t y = 0; y < s->height; y++) {
+		const uint32_t *r = row(s, y);
+		for (uint32_t x = 0; x < s->width; x++) {
+			uint32_t w = r[x];
+			if (w == SENTINEL) {
 				n_sentinel++;
-			} else if (*other == 0) {
-				*other = row[x];
+				continue;
+			}
+			if (!use_pattern) {
+				n_ok += (w & 0x00ffffffu) == 0x00ffffffu;
+				continue;
+			}
+			if (w == pattern(x, y)) {
+				n_ok++;
+			}
+			uint32_t px, py;
+			decode(w, &px, &py);
+			if ((w >> 24) == 0xff && px < s->width && py < s->height) {
+				n_pattern++;
+				// Word index of (px, py) in a 4x4-tiled layout with the
+				// same pitch
+				size_t tiled = (size_t)(py >> 2) * pitch * 4 + (px >> 2) * 16 +
+					(py & 3) * 4 + (px & 3);
+				n_tiled += tiled == (size_t)y * pitch + x;
 			}
 		}
 	}
-	bo_sync(bo, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
-	*white = (double)n_white / total;
-	*untouched = (double)n_sentinel / total;
+	scanout_sync(s, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
+
+	double ok = (double)n_ok / total, sentinel = (double)n_sentinel / total;
+	if (ok > 0.999) {
+		snprintf(msg, msg_size, "OK (%s, linear)", use_pattern ? "pattern" : "white");
+		return OUT_OK;
+	}
+	if (sentinel > 0.999) {
+		snprintf(msg, msg_size, "NOT WRITTEN (memory unchanged)");
+		return OUT_NOT_WRITTEN;
+	}
+	if (use_pattern && (double)n_tiled / total > 0.99) {
+		snprintf(msg, msg_size, "WRITTEN IN 4x4-TILED LAYOUT (pixels in the wrong place)");
+		return OUT_TILED;
+	}
+	if (use_pattern && (double)n_pattern / total > 0.9) {
+		snprintf(msg, msg_size,
+			"WRITTEN IN AN UNKNOWN LAYOUT (%.0f%% at the right place; pixels in the wrong place)",
+			ok * 100);
+		return OUT_TILED;
+	}
+	snprintf(msg, msg_size, "WRONG (%.0f%% right, %.0f%% unchanged)", ok * 100, sentinel * 100);
+	return OUT_WRONG;
 }
 
-static bool import_bo(struct vk *vk, struct bo *bo, VkFormat format, struct target *t) {
+static void scanout_dump(struct scanout *s) {
+	printf("      first pixels, decoded as (x,y) of the pattern:\n");
+	for (uint32_t y = 0; y < 4 && y < s->height; y++) {
+		printf("      row %u:", y);
+		const uint32_t *r = row(s, y);
+		for (uint32_t x = 0; x < 8 && x < s->width; x++) {
+			if (r[x] == SENTINEL) {
+				printf(" ------");
+			} else {
+				uint32_t px, py;
+				decode(r[x], &px, &py);
+				printf(" %u,%u", px, py);
+			}
+		}
+		printf("\n");
+	}
+}
+
+// --- Vulkan targets ---------------------------------------------------------
+
+static bool import_memory(struct vk *vk, struct scanout *s, VkMemoryRequirements *req,
+		VkImage image, VkBuffer buffer, VkDeviceMemory *memory) {
+	VkMemoryFdPropertiesKHR fdp = { .sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR };
+	VkResult res = vk->get_memory_fd_properties(vk->dev,
+		VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, s->fd, &fdp);
+	if (res != VK_SUCCESS) {
+		info("    vkGetMemoryFdPropertiesKHR failed: %d\n", res);
+		return false;
+	}
+	int type = find_mem_type(vk, req->memoryTypeBits & fdp.memoryTypeBits, 0);
+	if (type < 0) {
+		info("    no memory type for the DMA-BUF\n");
+		return false;
+	}
+	VkMemoryDedicatedAllocateInfo dedicated = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+		.image = image,
+		.buffer = buffer,
+	};
+	VkImportMemoryFdInfoKHR import = {
+		.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+		.pNext = &dedicated,
+		.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+		.fd = fcntl(s->fd, F_DUPFD_CLOEXEC, 0),
+	};
+	VkMemoryAllocateInfo mai = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = &import,
+		.allocationSize = req->size,
+		.memoryTypeIndex = (uint32_t)type,
+	};
+	res = vkAllocateMemory(vk->dev, &mai, NULL, memory);
+	if (res != VK_SUCCESS) {
+		info("    vkAllocateMemory (DMA-BUF import) failed: %d\n", res);
+		close(import.fd);
+		return false;
+	}
+	return true;
+}
+
+// Import the display buffer as a VkImage: with a DRM format modifier like
+// wlroots, or with VK_IMAGE_TILING_LINEAR
+static bool import_image(struct vk *vk, struct scanout *s, VkFormat format, bool linear_tiling,
+		struct target *t, char *msg, size_t msg_size) {
 	VkExternalMemoryImageCreateInfo emi = {
 		.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
 		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
 	};
-	VkSubresourceLayout layout = {
-		.offset = bo->offset,
-		.rowPitch = bo->stride,
-	};
-	uint64_t modifier = bo->modifier == DRM_FORMAT_MOD_INVALID ?
-		DRM_FORMAT_MOD_LINEAR : bo->modifier;
+	VkSubresourceLayout layout = { .offset = s->offset, .rowPitch = s->stride };
 	VkImageDrmFormatModifierExplicitCreateInfoEXT mod = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
-		.drmFormatModifier = modifier,
+		.drmFormatModifier = s->modifier == DRM_FORMAT_MOD_INVALID ?
+			DRM_FORMAT_MOD_LINEAR : s->modifier,
 		.drmFormatModifierPlaneCount = 1,
 		.pPlaneLayouts = &layout,
 	};
-	emi.pNext = &mod;
+	if (!linear_tiling) {
+		emi.pNext = &mod;
+	}
 	VkImageCreateInfo ici = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.pNext = &emi,
 		.imageType = VK_IMAGE_TYPE_2D,
 		.format = format,
-		.extent = { bo->width, bo->height, 1 },
+		.extent = { s->width, s->height, 1 },
 		.mipLevels = 1,
 		.arrayLayers = 1,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
-		.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+		.tiling = linear_tiling ? VK_IMAGE_TILING_LINEAR :
+			VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
 		.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -339,39 +522,55 @@ static bool import_bo(struct vk *vk, struct bo *bo, VkFormat format, struct targ
 	};
 	VkResult res = vkCreateImage(vk->dev, &ici, NULL, &t->image);
 	if (res != VK_SUCCESS) {
-		info("  vkCreateImage (DMA-BUF import) failed: %d\n", res);
+		snprintf(msg, msg_size, "FAILED (vkCreateImage: %d)", res);
 		return false;
 	}
-
-	VkMemoryFdPropertiesKHR fdp = { .sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR };
-	check(vk->get_memory_fd_properties(vk->dev,
-		VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, bo->fd, &fdp),
-		"vkGetMemoryFdPropertiesKHR");
+	if (linear_tiling) {
+		VkImageSubresource sub = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+		VkSubresourceLayout l;
+		vkGetImageSubresourceLayout(vk->dev, t->image, &sub, &l);
+		if (l.rowPitch != s->stride || l.offset != 0) {
+			snprintf(msg, msg_size, "FAILED (driver row pitch %llu, buffer stride %u)",
+				(unsigned long long)l.rowPitch, s->stride);
+			return false;
+		}
+	}
 	VkMemoryRequirements req;
 	vkGetImageMemoryRequirements(vk->dev, t->image, &req);
-	int type = find_mem_type(vk, req.memoryTypeBits & fdp.memoryTypeBits, 0);
-	if (type < 0) {
-		info("  no memory type for the DMA-BUF\n");
+	if (!import_memory(vk, s, &req, t->image, VK_NULL_HANDLE, &t->memory)) {
+		snprintf(msg, msg_size, "FAILED (DMA-BUF import)");
 		return false;
 	}
-	VkMemoryDedicatedAllocateInfo dedicated = {
-		.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
-		.image = t->image,
+	check(vkBindImageMemory(vk->dev, t->image, t->memory, linear_tiling ? s->offset : 0),
+		"vkBindImageMemory");
+	return true;
+}
+
+static bool import_buffer(struct vk *vk, struct scanout *s, struct target *t,
+		char *msg, size_t msg_size) {
+	VkExternalMemoryBufferCreateInfo emb = {
+		.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+		.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
 	};
-	VkImportMemoryFdInfoKHR import = {
-		.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
-		.pNext = &dedicated,
-		.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-		.fd = fcntl(bo->fd, F_DUPFD_CLOEXEC, 0),
+	VkBufferCreateInfo bci = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = &emb,
+		.size = (VkDeviceSize)s->offset + (VkDeviceSize)s->stride * s->height,
+		.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 	};
-	VkMemoryAllocateInfo mai = {
-		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-		.pNext = &import,
-		.allocationSize = req.size,
-		.memoryTypeIndex = (uint32_t)type,
-	};
-	check(vkAllocateMemory(vk->dev, &mai, NULL, &t->memory), "vkAllocateMemory (import)");
-	check(vkBindImageMemory(vk->dev, t->image, t->memory, 0), "vkBindImageMemory");
+	VkResult res = vkCreateBuffer(vk->dev, &bci, NULL, &t->buffer);
+	if (res != VK_SUCCESS) {
+		snprintf(msg, msg_size, "FAILED (vkCreateBuffer: %d)", res);
+		return false;
+	}
+	VkMemoryRequirements req;
+	vkGetBufferMemoryRequirements(vk->dev, t->buffer, &req);
+	if (!import_memory(vk, s, &req, VK_NULL_HANDLE, t->buffer, &t->memory)) {
+		snprintf(msg, msg_size, "FAILED (DMA-BUF import)");
+		return false;
+	}
+	check(vkBindBufferMemory(vk->dev, t->buffer, t->memory, 0), "vkBindBufferMemory");
 	return true;
 }
 
@@ -421,11 +620,16 @@ static void destroy_target(struct vk *vk, struct target *t) {
 	if (t->image) {
 		vkDestroyImage(vk->dev, t->image, NULL);
 	}
+	if (t->buffer) {
+		vkDestroyBuffer(vk->dev, t->buffer, NULL);
+	}
 	if (t->memory) {
 		vkFreeMemory(vk->dev, t->memory, NULL);
 	}
 	memset(t, 0, sizeof(*t));
 }
+
+// --- Rendering ------------------------------------------------------------
 
 // The render pass of wlroots' Vulkan renderer for formats without a blend
 // image: one color attachment in the GENERAL layout, loadOp LOAD
@@ -446,8 +650,8 @@ static VkShaderModule shader(struct vk *vk, const uint32_t *code, size_t size) {
 	return m;
 }
 
-static void create_pass(struct vk *vk, VkFormat format, bool clear, uint32_t w, uint32_t h,
-		struct pass *p) {
+static void create_pass(struct vk *vk, VkFormat format, bool clear, bool use_pattern,
+		uint32_t w, uint32_t h, struct pass *p) {
 	VkAttachmentDescription att = {
 		.format = format,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -477,7 +681,8 @@ static void create_pass(struct vk *vk, VkFormat format, bool clear, uint32_t w, 
 	check(vkCreatePipelineLayout(vk->dev, &pli, NULL, &p->layout), "vkCreatePipelineLayout");
 
 	VkShaderModule vs = shader(vk, fill_vert, sizeof(fill_vert));
-	VkShaderModule fs = shader(vk, fill_frag, sizeof(fill_frag));
+	VkShaderModule fs = use_pattern ? shader(vk, pattern_frag, sizeof(pattern_frag)) :
+		shader(vk, fill_frag, sizeof(fill_frag));
 	VkPipelineShaderStageCreateInfo stages[2] = {
 		{ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		  .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs, .pName = "main" },
@@ -550,9 +755,9 @@ static void destroy_pass(struct vk *vk, struct pass *p) {
 	vkDestroyRenderPass(vk->dev, p->render_pass, NULL);
 }
 
-static void barrier(VkCommandBuffer cb, VkImage image, VkImageLayout from, VkImageLayout to,
-		uint32_t src_family, uint32_t dst_family, VkAccessFlags src_access,
-		VkAccessFlags dst_access) {
+static void image_barrier(VkCommandBuffer cb, VkImage image, VkImageLayout from,
+		VkImageLayout to, uint32_t src_family, uint32_t dst_family,
+		VkAccessFlags src_access, VkAccessFlags dst_access) {
 	VkImageMemoryBarrier b = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 		.srcAccessMask = src_access,
@@ -566,6 +771,21 @@ static void barrier(VkCommandBuffer cb, VkImage image, VkImageLayout from, VkIma
 	};
 	vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &b);
+}
+
+static void buffer_barrier(VkCommandBuffer cb, VkBuffer buffer, uint32_t src_family,
+		uint32_t dst_family, VkAccessFlags src_access, VkAccessFlags dst_access) {
+	VkBufferMemoryBarrier b = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+		.srcAccessMask = src_access,
+		.dstAccessMask = dst_access,
+		.srcQueueFamilyIndex = src_family,
+		.dstQueueFamilyIndex = dst_family,
+		.buffer = buffer,
+		.size = VK_WHOLE_SIZE,
+	};
+	vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 1, &b, 0, NULL);
 }
 
 // Records the render pass; returns the framebuffer, which the caller destroys
@@ -601,21 +821,27 @@ static VkFramebuffer draw(struct vk *vk, VkCommandBuffer cb, struct pass *p,
 	return fb;
 }
 
-static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enum method m,
-		double *white_out) {
-	uint32_t w = bo->width, h = bo->height;
+static enum outcome run_method(struct vk *vk, struct scanout *s, VkFormat format,
+		bool unorm, enum method m, char *msg, size_t msg_size) {
+	uint32_t w = s->width, h = s->height;
 	uint32_t foreign = vk->has_foreign ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_IGNORED;
 	struct target dst = {0}, src = {0};
 	struct pass pass = {0};
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	VkBuffer host_buf = VK_NULL_HANDLE;
 	VkDeviceMemory host_mem = VK_NULL_HANDLE;
-	const char *result;
+	// The position pattern needs exact color values: UNORM only (sRGB
+	// encoding changes them), and not for the clears
+	bool use_pattern = m == M_BUFFER_COPY ||
+		(unorm && m != M_CLEAR_PASS && m != M_CLEAR_CMD);
+	enum outcome result = OUT_FAILED;
 
-	bo_fill(bo, SENTINEL);
-	if (!import_bo(vk, bo, format, &dst)) {
-		*white_out = 0;
-		return "import failed";
+	scanout_fill(s, SENTINEL);
+	bool ok = m == M_TO_BUFFER ? import_buffer(vk, s, &dst, msg, msg_size) :
+		import_image(vk, s, format, m == M_LINEAR_DRAW, &dst, msg, msg_size);
+	if (!ok) {
+		destroy_target(vk, &dst);
+		return OUT_FAILED;
 	}
 
 	VkCommandBufferAllocateInfo cai = {
@@ -635,9 +861,13 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 	bool use_foreign = m != M_DRAW_NOFOREIGN;
 	uint32_t from = use_foreign ? foreign : VK_QUEUE_FAMILY_IGNORED;
 	uint32_t to = use_foreign ? vk->family : VK_QUEUE_FAMILY_IGNORED;
-	// Acquire the DMA-BUF image like wlroots (first use: PREINITIALIZED)
-	barrier(cb, dst.image, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_LAYOUT_GENERAL,
-		from, to, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+	// Acquire the display buffer like wlroots (first use: PREINITIALIZED)
+	if (dst.image) {
+		image_barrier(cb, dst.image, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_LAYOUT_GENERAL,
+			from, to, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+	} else {
+		buffer_barrier(cb, dst.buffer, from, to, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+	}
 
 	VkClearColorValue white = { .float32 = { 1, 1, 1, 1 } };
 	VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -645,8 +875,9 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 	case M_DRAW:
 	case M_DRAW_NOFOREIGN:
 	case M_CLEAR_PASS:
+	case M_LINEAR_DRAW:
 		create_view(vk, format, &dst);
-		create_pass(vk, format, m == M_CLEAR_PASS, w, h, &pass);
+		create_pass(vk, format, m == M_CLEAR_PASS, use_pattern, w, h, &pass);
 		fb = draw(vk, cb, &pass, &dst, w, h, m == M_CLEAR_PASS);
 		break;
 	case M_CLEAR_CMD:
@@ -654,14 +885,15 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 		break;
 	case M_DRAW_COPY:
 	case M_DRAW_BLIT:
+	case M_TO_BUFFER:
 		create_optimal(vk, format, w, h, &src);
 		create_view(vk, format, &src);
-		create_pass(vk, format, false, w, h, &pass);
-		barrier(cb, src.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+		create_pass(vk, format, false, use_pattern, w, h, &pass);
+		image_barrier(cb, src.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
 			VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 0,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 		fb = draw(vk, cb, &pass, &src, w, h, false);
-		barrier(cb, src.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+		image_barrier(cb, src.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
 			VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 		if (m == M_DRAW_COPY) {
@@ -672,7 +904,7 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 			};
 			vkCmdCopyImage(cb, src.image, VK_IMAGE_LAYOUT_GENERAL,
 				dst.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-		} else {
+		} else if (m == M_DRAW_BLIT) {
 			VkImageBlit region = {
 				.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
 				.srcOffsets = { { 0, 0, 0 }, { (int32_t)w, (int32_t)h, 1 } },
@@ -681,6 +913,15 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 			};
 			vkCmdBlitImage(cb, src.image, VK_IMAGE_LAYOUT_GENERAL,
 				dst.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region, VK_FILTER_NEAREST);
+		} else {
+			VkBufferImageCopy region = {
+				.bufferOffset = s->offset,
+				.bufferRowLength = s->stride / 4,
+				.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+				.imageExtent = { w, h, 1 },
+			};
+			vkCmdCopyImageToBuffer(cb, src.image, VK_IMAGE_LAYOUT_GENERAL,
+				dst.buffer, 1, &region);
 		}
 		break;
 	case M_BUFFER_COPY: {
@@ -701,9 +942,13 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 		};
 		check(vkAllocateMemory(vk->dev, &mai, NULL, &host_mem), "vkAllocateMemory (host)");
 		check(vkBindBufferMemory(vk->dev, host_buf, host_mem, 0), "vkBindBufferMemory");
-		void *p;
-		check(vkMapMemory(vk->dev, host_mem, 0, bci.size, 0, &p), "vkMapMemory");
-		memset(p, 0xff, bci.size);
+		uint32_t *p;
+		check(vkMapMemory(vk->dev, host_mem, 0, bci.size, 0, (void **)&p), "vkMapMemory");
+		for (uint32_t y = 0; y < h; y++) {
+			for (uint32_t x = 0; x < w; x++) {
+				p[(size_t)y * w + x] = pattern(x, y);
+			}
+		}
 		vkUnmapMemory(vk->dev, host_mem);
 		VkBufferImageCopy region = {
 			.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
@@ -717,8 +962,12 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 	}
 
 	// Release to the display (FOREIGN), as wlroots does after rendering
-	barrier(cb, dst.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, to, from,
-		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+	if (dst.image) {
+		image_barrier(cb, dst.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, to, from,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+	} else {
+		buffer_barrier(cb, dst.buffer, to, from, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+	}
 	check(vkEndCommandBuffer(cb), "vkEndCommandBuffer");
 
 	VkSubmitInfo si = {
@@ -729,19 +978,9 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 	check(vkQueueSubmit(vk->queue, 1, &si, VK_NULL_HANDLE), "vkQueueSubmit");
 	check(vkQueueWaitIdle(vk->queue), "vkQueueWaitIdle");
 
-	double white_share, untouched;
-	uint32_t other;
-	bo_check(bo, &white_share, &untouched, &other);
-	*white_out = white_share;
-	static char buf[96];
-	if (white_share > 0.999) {
-		result = "OK (white)";
-	} else if (untouched > 0.999) {
-		result = "NOT WRITTEN (memory unchanged)";
-	} else {
-		snprintf(buf, sizeof(buf), "WRONG (%.0f%% white, %.0f%% unchanged, e.g. 0x%08x)",
-			white_share * 100, untouched * 100, other);
-		result = buf;
+	result = scanout_check(s, use_pattern, msg, msg_size);
+	if (verbose && result != OUT_OK && use_pattern) {
+		scanout_dump(s);
 	}
 
 	vkFreeCommandBuffers(vk->dev, vk->pool, 1, &cb);
@@ -762,7 +1001,20 @@ static const char *run_method(struct vk *vk, struct bo *bo, VkFormat format, enu
 
 static int open_kms_card(const char *path) {
 	if (path) {
-		return open(path, O_RDWR | O_CLOEXEC);
+		int fd = open(path, O_RDWR | O_CLOEXEC);
+		if (fd >= 0) {
+			drmModeResPtr res = drmModeGetResources(fd);
+			if (!res || res->count_connectors == 0) {
+				fprintf(stderr, "vk-scanout-test: %s has no display connectors; "
+					"use the display device (e.g. /dev/dri/card1)\n", path);
+				drmModeFreeResources(res);
+				close(fd);
+				return -1;
+			}
+			drmModeFreeResources(res);
+			info("Display device: %s\n", path);
+		}
+		return fd;
 	}
 	drmDevicePtr devices[16];
 	int n = drmGetDevices2(0, devices, 16);
@@ -792,7 +1044,7 @@ int main(int argc, char **argv) {
 	const char *dev_path = NULL;
 	uint32_t w = 1024, h = 600;
 	int opt;
-	while ((opt = getopt(argc, argv, "d:s:qh")) != -1) {
+	while ((opt = getopt(argc, argv, "d:s:qvh")) != -1) {
 		switch (opt) {
 		case 'd': dev_path = optarg; break;
 		case 's':
@@ -802,18 +1054,19 @@ int main(int argc, char **argv) {
 			}
 			break;
 		case 'q': quiet = true; break;
+		case 'v': verbose = true; break;
 		default:
-			fprintf(stderr, "usage: %s [-d /dev/dri/cardN] [-s WxH] [-q]\n", argv[0]);
+			fprintf(stderr, "usage: %s [-d /dev/dri/cardN] [-s WxH] [-q] [-v]\n", argv[0]);
 			return opt == 'h' ? 0 : 2;
 		}
 	}
 
-	int fd = open_kms_card(dev_path);
-	if (fd < 0) {
+	int kms_fd = open_kms_card(dev_path);
+	if (kms_fd < 0) {
 		fprintf(stderr, "vk-scanout-test: no display device found (try -d)\n");
 		return 2;
 	}
-	struct gbm_device *gbm = gbm_create_device(fd);
+	struct gbm_device *gbm = gbm_create_device(kms_fd);
 	if (!gbm) {
 		fprintf(stderr, "vk-scanout-test: gbm_create_device failed\n");
 		return 2;
@@ -825,53 +1078,71 @@ int main(int argc, char **argv) {
 	struct {
 		uint32_t drm;
 		VkFormat vk;
+		bool unorm;
 		const char *name;
 	} formats[] = {
-		// wlroots maps XRGB8888 (the format of the desktop's buffers) to
-		// B8G8R8A8_SRGB and ARGB8888 to B8G8R8A8_UNORM
-		{ DRM_FORMAT_XRGB8888, VK_FORMAT_B8G8R8A8_SRGB, "XRGB8888 as B8G8R8A8_SRGB" },
-		{ DRM_FORMAT_ARGB8888, VK_FORMAT_B8G8R8A8_UNORM, "ARGB8888 as B8G8R8A8_UNORM" },
+		// wlroots maps XRGB8888 (the desktop's buffers) to B8G8R8A8_SRGB
+		{ DRM_FORMAT_XRGB8888, VK_FORMAT_B8G8R8A8_SRGB, false, "XRGB8888 as B8G8R8A8_SRGB" },
+		// UNORM: exact values, so the position pattern is used
+		{ DRM_FORMAT_ARGB8888, VK_FORMAT_B8G8R8A8_UNORM, true, "ARGB8888 as B8G8R8A8_UNORM" },
+	};
+	const char *kind_names[] = {
+		[DUMB] = "dumb buffer (what the display scans out)",
+		[GBM] = "GBM buffer, as wlroots allocates (readback may be stale)",
 	};
 
-	bool direct_ok = true, copy_ok = true;
+	// Results on the dumb buffers decide: their readback is reliable
+	bool ok[M_COUNT];
+	bool tested[M_COUNT] = {0};
+	for (int m = 0; m < M_COUNT; m++) {
+		ok[m] = true;
+	}
 	for (size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); f++) {
 		info("\n");
-		print_modifiers(&vk, formats[f].vk, formats[f].name);
-		struct bo bo;
-		if (!bo_create(gbm, formats[f].drm, w, h, &bo)) {
-			return 2;
-		}
-		char *mname = drmGetFormatModifierName(bo.modifier);
-		info("GBM buffer %ux%u: stride %u, offset %u, modifier %s\n", w, h, bo.stride,
-			bo.offset, mname ? mname : "INVALID (implicit)");
-		free(mname);
-		for (int m = 0; m < M_COUNT; m++) {
-			double white;
-			const char *r = run_method(&vk, &bo, formats[f].vk, m, &white);
-			info("  %-34s %s\n", method_names[m], r);
-			bool ok = white > 0.999;
-			if (m == M_DRAW && !ok) {
-				direct_ok = false;
+		print_format(&vk, formats[f].vk, formats[f].name);
+		for (int k = DUMB; k <= GBM; k++) {
+			struct scanout s;
+			if (!scanout_create(k, kms_fd, gbm, formats[f].drm, w, h, &s)) {
+				scanout_destroy(&s);
+				continue;
 			}
-			if (m == M_DRAW_COPY && !ok) {
-				copy_ok = false;
+			char *mname = drmGetFormatModifierName(s.modifier);
+			info(" %s, %ux%u, stride %u, modifier %s:\n", kind_names[k], w, h,
+				s.stride, mname ? mname : "INVALID (implicit)");
+			free(mname);
+			for (int m = 0; m < M_COUNT; m++) {
+				char msg[160];
+				enum outcome r = run_method(&vk, &s, formats[f].vk, formats[f].unorm,
+					m, msg, sizeof(msg));
+				info("  %-46s %s\n", method_names[m], msg);
+				if (k == DUMB) {
+					tested[m] = true;
+					ok[m] = ok[m] && r == OUT_OK;
+				}
 			}
+			scanout_destroy(&s);
 		}
-		munmap(bo.map, bo.map_size);
-		close(bo.fd);
-		gbm_bo_destroy(bo.gbm);
 	}
 
-	const char *mode = direct_ok ? "direct" : copy_ok ? "copy" : "none";
+	const char *mode = "none";
+	if (tested[M_DRAW] && ok[M_DRAW]) {
+		mode = "direct";
+	} else if (tested[M_DRAW_COPY] && ok[M_DRAW_COPY]) {
+		mode = "copy";
+	} else if (tested[M_TO_BUFFER] && ok[M_TO_BUFFER]) {
+		mode = "buffer";
+	}
 	if (quiet) {
 		printf("%s\n", mode);
 	} else {
 		printf("\nRecommended wlroots Vulkan mode: %s\n", mode);
-		if (!direct_ok && copy_ok) {
-			printf("  -> rendering into display buffers doesn't reach memory; use "
-				"LABWC_RENDERERS=vulkan-copy (WLR_VK_RENDER_COPY=1)\n");
-		} else if (!direct_ok) {
-			printf("  -> Vulkan can't write display buffers on this driver; use gles2\n");
+		if (strcmp(mode, "copy") == 0) {
+			printf("  -> desktop strategy vulkan-copy (WLR_VK_RENDER_COPY=1)\n");
+		} else if (strcmp(mode, "buffer") == 0) {
+			printf("  -> images in display memory get the wrong layout; desktop strategy "
+				"vulkan-buffer (WLR_VK_RENDER_BUFFER=1)\n");
+		} else if (strcmp(mode, "none") == 0) {
+			printf("  -> Vulkan can't write display buffers correctly on this driver; use gles2\n");
 		}
 	}
 
@@ -879,6 +1150,6 @@ int main(int argc, char **argv) {
 	vkDestroyDevice(vk.dev, NULL);
 	vkDestroyInstance(vk.instance, NULL);
 	gbm_device_destroy(gbm);
-	close(fd);
+	close(kms_fd);
 	return strcmp(mode, "none") == 0 ? 1 : 0;
 }

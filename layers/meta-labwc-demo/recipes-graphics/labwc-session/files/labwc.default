@@ -7,10 +7,18 @@
 #   gles2         OpenGL ES 2 renderer on the display device (as Weston does)
 #   gles2-render  OpenGL ES 2 renderer on the GPU render node
 #   pixman        software rendering on the CPU (slow, always works)
-#   vulkan        Vulkan renderer on the Vivante GPU. EXPERIMENTAL, not used
-#                 by default: on the i.MX8MP the screen stays black with it.
+#   Vulkan strategies (EXPERIMENTAL, not used by default):
+#   vulkan-auto   picks one of the following with vk-scanout-test, or none
+#   vulkan-buffer renders off-screen, copies into display memory through a
+#                 VkBuffer (for drivers that write images tiled, like Vivante)
+#   vulkan-copy   renders off-screen, copies with vkCmdCopyImage
+#   vulkan        renders into the display buffers directly (black screen on
+#                 the i.MX8MP)
+#   vulkan-noforeign  vulkan without queue ownership transfers
 # Default order:
 #LABWC_RENDERERS="gles2 gles2-render pixman"
+# To try Vulkan first:
+#LABWC_RENDERERS="vulkan-auto gles2 pixman"
 # Check which one is in use with labwc-hwaccel-check, and which ones show a
 # picture with: sudo labwc-gpu-probe --kms
 #

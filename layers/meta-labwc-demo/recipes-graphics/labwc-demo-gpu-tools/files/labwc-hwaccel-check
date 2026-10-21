@@ -74,7 +74,8 @@ if have vk-scanout-test; then
     vkmode=$(timeout 60 vk-scanout-test -q 2>/dev/null)
     case $vkmode in
     direct) PASS "vk-scanout" "Vulkan rendering reaches display buffers (desktop strategy: vulkan)" ;;
-    copy)   WARN "vk-scanout" "Vulkan needs render-copy mode for the desktop (strategy: vulkan-copy); details: vk-scanout-test" ;;
+    copy)   PASS "vk-scanout" "Vulkan reaches display buffers in render-copy mode (desktop strategy: vulkan-copy)" ;;
+    buffer) PASS "vk-scanout" "Vulkan reaches display buffers through a VkBuffer (desktop strategy: vulkan-buffer)" ;;
     *)      WARN "vk-scanout" "Vulkan rendering does not reach display buffers (${vkmode:-test failed}); details: vk-scanout-test" ;;
     esac
 fi

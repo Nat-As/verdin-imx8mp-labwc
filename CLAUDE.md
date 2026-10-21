@@ -83,6 +83,13 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   `vulkan-auto` (uses `vk-scanout-test -q`: direct/copy/none). `vk-scanout-test` (C, in
   labwc-demo-gpu-tools) imports a linear GBM scanout BO into Vulkan and checks which write
   methods reach memory; all OK on Intel/Mesa (validated on the build host).
+- v0.1.1 hardware result: vk-scanout-test said "NOT WRITTEN" for every method (readback through
+  the GBM BO's DMA-BUF mmap, probably stale/cached), but the user saw scrambled pixels on screen
+  with all vulkan strategies: VSI writes images in imported memory in its own tiled layout. v0.1.2:
+  vk-scanout-test reads back through a DRM dumb buffer (uncached, ground truth), uses a position
+  pattern (detects 4x4 tiling), adds LINEAR-tiling and VkBuffer methods; wlroots patch 0005
+  `WLR_VK_RENDER_BUFFER` (render to optimal image, vkCmdCopyImageToBuffer into the DMA-BUF bound
+  as VkBuffer); strategy `vulkan-buffer`, `vulkan-auto` maps direct/copy/buffer.
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm

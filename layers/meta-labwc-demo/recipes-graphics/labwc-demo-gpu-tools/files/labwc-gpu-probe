@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan vulkan-copy vulkan-noforeign gles2-device pixman)
+[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan-buffer vulkan vulkan-copy vulkan-noforeign gles2-device pixman)
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "labwc-gpu-probe: run as root (sudo labwc-gpu-probe)" >&2
@@ -85,6 +85,7 @@ strategy_env() {
     vulkan)       echo "WLR_RENDERER=vulkan$finish" ;;
     vulkan-copy)  echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
     vulkan-noforeign) echo "WLR_RENDERER=vulkan WLR_VK_NO_FOREIGN=1$finish" ;;
+    vulkan-buffer) echo "WLR_RENDERER=vulkan WLR_VK_RENDER_BUFFER=1$finish" ;;
     gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1$finish" ;;
     gles2-render) echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1${render_node:+ WLR_RENDER_DRM_DEVICE=$render_node}$finish" ;;
     gles2-device) echo "WLR_RENDERER=gles2$finish" ;;

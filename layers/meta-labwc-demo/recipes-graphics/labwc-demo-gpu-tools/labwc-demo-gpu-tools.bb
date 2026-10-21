@@ -13,6 +13,7 @@ SRC_URI = " \
     file://vk-scanout-test.c \
     file://fill.vert \
     file://fill.frag \
+    file://pattern.frag \
 "
 
 S = "${WORKDIR}"
@@ -27,6 +28,7 @@ PACKAGE_ARCH = "${MACHINE_SOCARCH}"
 do_compile() {
     glslangValidator -V --vn fill_vert -o fill_vert.h ${S}/fill.vert
     glslangValidator -V --vn fill_frag -o fill_frag.h ${S}/fill.frag
+    glslangValidator -V --vn pattern_frag -o pattern_frag.h ${S}/pattern.frag
     ${CC} ${CFLAGS} ${LDFLAGS} -Wall -Wextra -Wno-unused-parameter -I. \
         $(pkg-config --cflags libdrm) ${S}/vk-scanout-test.c -o vk-scanout-test \
         -lvulkan -lgbm -ldrm
