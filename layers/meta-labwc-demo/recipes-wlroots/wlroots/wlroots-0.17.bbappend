@@ -4,11 +4,14 @@
 # renderer is always built and is used as the runtime fallback (see
 # labwc-session). The Vulkan renderer is not built: the Vivante Vulkan driver
 # cannot render into the display buffers wlroots allocates (v0.1.x tests).
+# Patch 0003 binds the Wayland display to EGL (eglBindWaylandDisplayWL), which
+# provides Vivante's wl_viv protocol: without it every OpenGL ES client crashes.
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += " \
     file://0001-egl-add-WLR_EGL_SKIP_DEVICE-and-log-EGL-setup-steps.patch \
     file://0002-gles2-add-WLR_RENDERER_FINISH-to-wait-for-the-GPU-af.patch \
+    file://0003-render-bind-the-Wayland-display-to-EGL-for-EGL_WL_bi.patch \
 "
 
 PACKAGECONFIG:append = " opengl gbm"

@@ -4,10 +4,8 @@
 # Renderer: labwc-session tries these renderer strategies in order and falls
 # back to the next one if labwc crashes, hangs or logs renderer errors during
 # startup (see /usr/bin/labwc-session):
-#   gles2-render  OpenGL ES 2 renderer on the GPU render node (default; OpenGL
-#                 ES applications can show their windows)
-#   gles2         OpenGL ES 2 renderer on the display device (as Weston does;
-#                 OpenGL ES applications cannot show windows)
+#   gles2-render  OpenGL ES 2 renderer on the GPU render node (default)
+#   gles2         OpenGL ES 2 renderer on the display device (as Weston does)
 #   pixman        software rendering on the CPU (slow, always works)
 # Default order:
 #LABWC_RENDERERS="gles2-render gles2 pixman"

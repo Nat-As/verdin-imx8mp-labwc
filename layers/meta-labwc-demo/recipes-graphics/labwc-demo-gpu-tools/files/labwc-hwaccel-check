@@ -59,6 +59,14 @@ else
 fi
 failed=$(cat /tmp/labwc-session-*/failed 2>/dev/null | tr '\n' ' ')
 [ -n "$failed" ] && ! echo "$state" | grep -q pixman && INFO "renderer" "strategies that failed this boot: $failed"
+# OpenGL ES clients present through Vivante's wl_viv protocol, which exists only
+# when wlroots binds the display to EGL (patch 0003); the last labwc start counts
+bind=$(journalctl -b -t labwc -o cat 2>/dev/null | grep -oE "Creating (GLES2|pixman) renderer|Bound the Wayland display to EGL|eglBindWaylandDisplayWL failed|WLR_EGL_NO_BIND_DISPLAY set" | tail -n1)
+case $bind in
+"Bound the Wayland display to EGL") PASS "egl-bind" "Wayland display bound to EGL (wl_viv for OpenGL ES clients)" ;;
+"Creating pixman renderer"|"") ;;
+*) FAIL "egl-bind" "Wayland display not bound to EGL ($bind): OpenGL ES applications cannot open windows" ;;
+esac
 
 # --- OpenGL ES applications on the desktop ----------------------------------------
 # Runs GPU Test (an OpenGL ES client) for about 2 seconds in the running desktop,

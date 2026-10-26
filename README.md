@@ -48,7 +48,7 @@ OpenCV.
 **Pre-release v0.2.0:**
 **[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar)** (629 MB)
 
-SHA-256: `72a3a742519a56c8713d025010608addfd817ad923a37f32feedf9aa07e5bdee`
+SHA-256: `2bd275df0e91b557b17bc38c57c05344ee57088d1f7001e00901caac9ff4c3aa`
 ([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar.sha256),
 [release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.2.0),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
@@ -199,14 +199,14 @@ a renderer that crashes, hangs or reports errors during startup is skipped until
 | Strategy | Renderer |
 |---|---|
 | `gles2-render` | OpenGL ES 2 on the GPU render node; the default |
-| `gles2` | OpenGL ES 2 on the display device (desktop works, but OpenGL ES applications cannot show windows) |
+| `gles2` | OpenGL ES 2 on the display device (the way Weston uses the GPU) |
 | `pixman` | Software rendering on the CPU (slow; last resort) |
 
 The renderer in use is shown by `labwc-hwaccel-check` and in the desktop log
-(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). `gles2-render` is the default
-because the Vivante OpenGL ES driver in applications finds the GPU through the device that the
-desktop advertises: with `gles2` that is the display device, and applications' windows stay
-invisible. The desktop does not use Vulkan (the NXP Vulkan driver cannot draw into the display
+(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). With the GPU
+renderers, the desktop provides the Vivante driver's own Wayland protocol (`wl_viv`, through
+`EGL_WL_bind_wayland_display`, as Weston does), which OpenGL ES applications need to show their
+windows; `labwc-hwaccel-check` reports it as `egl-bind`. The desktop does not use Vulkan (the NXP Vulkan driver cannot draw into the display
 buffers on this board); the Vulkan driver of the BSP is still installed for applications.
 
 All GPU strategies wait for the GPU to finish each frame before it is shown. The Vivante driver

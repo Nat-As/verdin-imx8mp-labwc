@@ -70,8 +70,8 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 - NetworkManager (connman removed, systemd-networkd/dnsmasq masked), BlueZ + Blueman.
 - Python 3.12 + numpy/scipy/pandas/matplotlib/OpenCV/PyQt6, Qt 6.11, dev tools, all kernel
   modules, Realtek out-of-tree `r8152` (preferred via depmod override).
-- GPU rendering (v0.2.0): wlroots is built with **only** the gles2 renderer (+ pixman) and two
-  patches (`recipes-wlroots/wlroots/files/`): 0001 `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead
+- GPU rendering (v0.2.0): wlroots is built with **only** the gles2 renderer (+ pixman) and three
+  patches (`recipes-wlroots/wlroots/files/`, 0003 below): 0001 `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead
   of the EGL device lookup: stock wlroots segfaults in Vivante's `eglQueryDevicesEXT()`,
   gdb-confirmed) and 0002 `WLR_RENDERER_FINISH` (glFinish per frame, set by labwc-session; fixes
   black flashes in redrawn areas: Vivante gives no implicit-sync fence). `labwc-session` tries the
@@ -83,11 +83,17 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   showed a black or scrambled screen; only Vulkan-allocated exported buffers worked. Don't
   reintroduce it unless asked. The BSP's Vulkan driver/vulkan-tools still come in via Toradex's
   `packagegroup-vulkan-tools-tdx-graphical`.
-- OpenGL ES clients (v0.1.4 hardware: GPU Test and glmark2 showed no window): Vivante client EGL
-  finds the GPU through wl_drm, and wlroots' wl_drm advertises the renderer's DRM node. With
-  `gles2` that is `card1` (imx-drm, display only), with `gles2-render` it is `renderD128`, hence
-  the v0.2.0 default. GL apps log to the journal (`-t gpu-test`, `-t glmark2`; `gpu-benchmark`
-  wrapper keeps the terminal open and reports signals).
+- OpenGL ES clients: the Vivante client EGL (no linux-dmabuf support) presents only through its
+  vendor protocol `wl_viv`, which its libEGL creates server-side in `eglBindWaylandDisplayWL()`
+  (also its own `wl_drm`). wlroots dropped that call in 0.15, so every GL client (GPU Test,
+  glmark2) segfaulted on its first EGL call (v0.2.0 rev 1 hardware test, exit 139), with both
+  `gles2` and `gles2-render`. wlroots patch 0003 binds the display (`WLR_EGL_NO_BIND_DISPLAY=1`
+  disables it; wlroots' own wl_drm is then skipped), adds a fallback `wlr_buffer` type for EGL
+  wl_buffers (checked after shm/dmabuf/drm/single-pixel, Weston's order) and imports them as
+  `EGL_WAYLAND_BUFFER_WL` images, cached per buffer and re-bound per commit (as NXP Weston does),
+  with a Y flip for `EGL_WAYLAND_Y_INVERTED_WL` = false. `labwc-hwaccel-check` reports
+  `egl-bind`. GL apps log to the journal (`-t gpu-test`, `-t glmark2`); `gpu-test --journal` is
+  used by the launcher entry only, so pipes and files get the output (hwaccel, probe).
 - Boot splash (v0.1.3): Plymouth (meta-oe, bbappend: `drm` on, `initrd` off) with the two-step theme
   `argos` (`recipes-graphics/argos-boot-splash`; images from `scripts/make-boot-splash.py`: logo cut
   from the wallpaper + 30 red starburst spinner frames). Kernel fragment `display-builtin.cfg`

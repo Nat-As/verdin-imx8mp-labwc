@@ -179,10 +179,14 @@ try:
     ]:
         diag.append(f"$ {cmd}\n{run(cmd)}\n")
     # Launch a terminal into the running session as the desktop user
-    run(f"cd /tmp && runuser -u {DESKTOP} -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 LANG=en_US.UTF-8 sh -c 'foot -T htop htop >/tmp/foot.log 2>&1 &'")
+    # (LAUNCH: another command line, e.g. a .desktop Exec line; no ' quotes)
+    launch = os.environ.get("LAUNCH", "foot -T htop htop")
+    run(f"cd /tmp && runuser -u {DESKTOP} -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 LANG=en_US.UTF-8 sh -c '{launch} >/tmp/foot.log 2>&1 &'")
     time.sleep(60)
     screendump("screen-foot")
     diag.append(f"$ cat /tmp/foot.log\n{run('cat /tmp/foot.log')}\n")
+    diag.append("$ journalctl -b -t gpu-test -t glmark2\n"
+                f"{run('journalctl -b -t gpu-test -t glmark2 --no-pager -o cat | tail -n 20')}\n")
     # Restart the session to make sure the unit is restartable
     diag.append(f"$ systemctl restart labwc\n{run('systemctl restart labwc; sleep 5; systemctl is-active labwc')}\n")
     with open(os.path.join(work, "diag.txt"), "w") as f:

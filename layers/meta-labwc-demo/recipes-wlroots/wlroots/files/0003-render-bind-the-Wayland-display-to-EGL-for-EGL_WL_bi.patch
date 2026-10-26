@@ -1,0 +1,645 @@
+From 101d071557304b64fd5f620eb5955617b997aa65 Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 14:29:13 -0400
+Subject: [PATCH 3/3] render: bind the Wayland display to EGL for
+ EGL_WL_bind_wayland_display
+
+The Vivante (i.MX) EGL driver presents client buffers only through its
+own wl_viv protocol, which the compositor provides by calling
+eglBindWaylandDisplayWL(); it has no linux-dmabuf client support.
+wlroots dropped that call, so every OpenGL ES client segfaults on its
+first EGL call.
+
+- egl: load eglBind/UnbindWaylandDisplayWL and eglQueryWaylandBufferWL,
+  unbind on destroy, create EGL images from EGL wl_buffers.
+- gles2: bind the display in wlr_renderer_init_wl_display() (the EGL
+  implementation then provides its own wl_drm, so ours is skipped);
+  WLR_EGL_NO_BIND_DISPLAY=1 turns it off.
+- A wlr_buffer type for EGL wl_buffers, tried after all other buffer
+  types (fallback resource interface), so that eglQueryWaylandBufferWL
+  only sees buffers no other implementation claims (Weston's order).
+- GLES2 textures from those buffers: one EGL image per buffer, re-bound
+  on each commit like DMA-BUF textures (and like Weston), with a
+  vertical flip for buffers whose origin is at the bottom left.
+---
+ include/render/egl.h       |  49 +++++++++++++
+ include/render/gles2.h     |  20 +++++
+ include/types/wlr_buffer.h |  10 +++
+ render/egl.c               |  54 ++++++++++++++
+ render/gles2/meson.build   |   1 +
+ render/gles2/pass.c        |  10 ++-
+ render/gles2/renderer.c    |   1 +
+ render/gles2/texture.c     |  91 +++++++++++++++++++++++
+ render/gles2/wl_buffer.c   | 146 +++++++++++++++++++++++++++++++++++++
+ render/wlr_renderer.c      |  12 ++-
+ types/buffer/resource.c    |  11 +++
+ 11 files changed, 402 insertions(+), 3 deletions(-)
+ create mode 100644 render/gles2/wl_buffer.c
+
+diff --git a/include/render/egl.h b/include/render/egl.h
+index e8b8596..18a3468 100644
+--- a/include/render/egl.h
++++ b/include/render/egl.h
+@@ -3,6 +3,28 @@
+ 
+ #include <wlr/render/egl.h>
+ 
++struct wl_display;
++struct wl_resource;
++
++// EGL_WL_bind_wayland_display: the EGL implementation provides the Wayland
++// globals its clients need (e.g. Vivante's wl_viv) and imports their buffers
++#ifndef EGL_WAYLAND_BUFFER_WL
++#define EGL_WAYLAND_BUFFER_WL 0x31D5
++#define EGL_WAYLAND_PLANE_WL 0x31D6
++#define EGL_TEXTURE_Y_U_V_WL 0x31D7
++#define EGL_TEXTURE_Y_UV_WL 0x31D8
++#define EGL_TEXTURE_Y_XUXV_WL 0x31D9
++#define EGL_TEXTURE_EXTERNAL_WL 0x31DA
++#define EGL_WAYLAND_Y_INVERTED_WL 0x31DB
++#endif
++
++typedef EGLBoolean (EGLAPIENTRYP wlr_PFNEGLBINDWAYLANDDISPLAYWL)(
++	EGLDisplay dpy, struct wl_display *display);
++typedef EGLBoolean (EGLAPIENTRYP wlr_PFNEGLUNBINDWAYLANDDISPLAYWL)(
++	EGLDisplay dpy, struct wl_display *display);
++typedef EGLBoolean (EGLAPIENTRYP wlr_PFNEGLQUERYWAYLANDBUFFERWL)(
++	EGLDisplay dpy, struct wl_resource *buffer, EGLint attribute, EGLint *value);
++
+ struct wlr_egl {
+ 	EGLDisplay display;
+ 	EGLContext context;
+@@ -16,6 +38,7 @@ struct wlr_egl {
+ 		bool EXT_image_dma_buf_import_modifiers;
+ 		bool IMG_context_priority;
+ 		bool EXT_create_context_robustness;
++		bool WL_bind_wayland_display;
+ 
+ 		// Device extensions
+ 		bool EXT_device_drm;
+@@ -38,8 +61,13 @@ struct wlr_egl {
+ 		PFNEGLQUERYDISPLAYATTRIBEXTPROC eglQueryDisplayAttribEXT;
+ 		PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceStringEXT;
+ 		PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT;
++		wlr_PFNEGLBINDWAYLANDDISPLAYWL eglBindWaylandDisplayWL;
++		wlr_PFNEGLUNBINDWAYLANDDISPLAYWL eglUnbindWaylandDisplayWL;
++		wlr_PFNEGLQUERYWAYLANDBUFFERWL eglQueryWaylandBufferWL;
+ 	} procs;
+ 
++	struct wl_display *wl_display; // bound with eglBindWaylandDisplayWL
++
+ 	bool has_modifiers;
+ 	struct wlr_drm_format_set dmabuf_texture_formats;
+ 	struct wlr_drm_format_set dmabuf_render_formats;
+@@ -72,6 +100,27 @@ void wlr_egl_destroy(struct wlr_egl *egl);
+ EGLImageKHR wlr_egl_create_image_from_dmabuf(struct wlr_egl *egl,
+ 	struct wlr_dmabuf_attributes *attributes, bool *external_only);
+ 
++/**
++ * Binds the Wayland display with EGL_WL_bind_wayland_display, so that the EGL
++ * implementation provides the protocols of its Wayland clients (Vivante:
++ * wl_viv, wl_drm). Returns false if the extension is missing or fails.
++ */
++bool wlr_egl_bind_wayland_display(struct wlr_egl *egl,
++	struct wl_display *wl_display);
++
++/**
++ * Queries an attribute of a wl_buffer created by the EGL implementation.
++ * Returns false for any other buffer.
++ */
++bool wlr_egl_query_wayland_buffer(struct wlr_egl *egl,
++	struct wl_resource *buffer, EGLint attrib, EGLint *value);
++
++/**
++ * Creates an EGL image from a wl_buffer of the EGL implementation.
++ */
++EGLImageKHR wlr_egl_create_image_from_wl_buffer(struct wlr_egl *egl,
++	struct wl_resource *buffer);
++
+ /**
+  * Get DMA-BUF formats suitable for sampling usage.
+  */
+diff --git a/include/render/gles2.h b/include/render/gles2.h
+index 490e992..6c5e93b 100644
+--- a/include/render/gles2.h
++++ b/include/render/gles2.h
+@@ -12,6 +12,7 @@
+ #include <wlr/render/interface.h>
+ #include <wlr/render/wlr_renderer.h>
+ #include <wlr/render/wlr_texture.h>
++#include <wlr/types/wlr_buffer.h>
+ #include <wlr/util/addon.h>
+ #include <wlr/util/log.h>
+ 
+@@ -128,6 +129,8 @@ struct wlr_gles2_texture {
+ 	EGLImageKHR image;
+ 
+ 	bool has_alpha;
++	// The texture's origin is at the bottom left (EGL Wayland buffers)
++	bool flip_y;
+ 
+ 	// Only affects target == GL_TEXTURE_2D
+ 	uint32_t drm_format; // used to interpret upload data
+@@ -162,6 +165,23 @@ struct wlr_texture *gles2_texture_from_buffer(struct wlr_renderer *wlr_renderer,
+ 	struct wlr_buffer *buffer);
+ void gles2_texture_destroy(struct wlr_gles2_texture *texture);
+ 
++// A wl_buffer of the EGL implementation (EGL_WL_bind_wayland_display)
++struct wlr_gles2_wl_buffer {
++	struct wlr_buffer base;
++	struct wl_resource *resource; // NULL once the client destroyed it
++	EGLint texture_format; // EGL_TEXTURE_RGB, EGL_TEXTURE_RGBA, ...
++	bool y_inverted; // false: the origin is at the bottom left
++
++	struct wl_listener resource_destroy;
++	struct wl_listener release;
++};
++
++struct wlr_gles2_wl_buffer *gles2_wl_buffer_try_from_buffer(
++	struct wlr_buffer *buffer);
++bool gles2_renderer_bind_wl_display(struct wlr_renderer *renderer,
++	struct wl_display *wl_display);
++void gles2_renderer_unbind_wl_display(struct wlr_gles2_renderer *renderer);
++
+ void push_gles2_debug_(struct wlr_gles2_renderer *renderer,
+ 	const char *file, const char *func);
+ #define push_gles2_debug(renderer) push_gles2_debug_(renderer, _WLR_FILENAME, __func__)
+diff --git a/include/types/wlr_buffer.h b/include/types/wlr_buffer.h
+index 947ccde..1764ca1 100644
+--- a/include/types/wlr_buffer.h
++++ b/include/types/wlr_buffer.h
+@@ -74,4 +74,14 @@ struct wlr_client_buffer *wlr_client_buffer_create(struct wlr_buffer *buffer,
+ bool wlr_client_buffer_apply_damage(struct wlr_client_buffer *client_buffer,
+ 	struct wlr_buffer *next, const pixman_region32_t *damage);
+ 
++struct wlr_buffer_resource_interface;
++
++/**
++ * Sets the interface that is tried after all registered ones, for wl_buffers
++ * that only the EGL implementation can identify (EGL_WL_bind_wayland_display).
++ * NULL removes it.
++ */
++void wlr_buffer_set_fallback_resource_interface(
++	const struct wlr_buffer_resource_interface *iface);
++
+ #endif
+diff --git a/render/egl.c b/render/egl.c
+index 9d391c2..d5e7c16 100644
+--- a/render/egl.c
++++ b/render/egl.c
+@@ -308,6 +308,16 @@ static bool egl_init_display(struct wlr_egl *egl, EGLDisplay display) {
+ 	egl->exts.EXT_create_context_robustness =
+ 		check_egl_ext(display_exts_str, "EGL_EXT_create_context_robustness");
+ 
++	if (check_egl_ext(display_exts_str, "EGL_WL_bind_wayland_display")) {
++		egl->exts.WL_bind_wayland_display = true;
++		load_egl_proc(&egl->procs.eglBindWaylandDisplayWL,
++			"eglBindWaylandDisplayWL");
++		load_egl_proc(&egl->procs.eglUnbindWaylandDisplayWL,
++			"eglUnbindWaylandDisplayWL");
++		load_egl_proc(&egl->procs.eglQueryWaylandBufferWL,
++			"eglQueryWaylandBufferWL");
++	}
++
+ 	const char *device_exts_str = NULL, *driver_name = NULL;
+ 	if (egl->exts.EXT_device_query) {
+ 		wlr_log(WLR_INFO, "Querying EGL device of the display");
+@@ -630,6 +640,10 @@ void wlr_egl_destroy(struct wlr_egl *egl) {
+ 	wlr_drm_format_set_finish(&egl->dmabuf_render_formats);
+ 	wlr_drm_format_set_finish(&egl->dmabuf_texture_formats);
+ 
++	if (egl->wl_display != NULL) {
++		egl->procs.eglUnbindWaylandDisplayWL(egl->display, egl->wl_display);
++	}
++
+ 	eglMakeCurrent(egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+ 	eglDestroyContext(egl->display, egl->context);
+ 
+@@ -713,6 +727,46 @@ bool wlr_egl_restore_context(struct wlr_egl_context *context) {
+ 			context->read_surface, context->context);
+ }
+ 
++bool wlr_egl_bind_wayland_display(struct wlr_egl *egl,
++		struct wl_display *wl_display) {
++	if (!egl->exts.WL_bind_wayland_display || !egl->exts.KHR_image_base) {
++		return false;
++	}
++	if (!egl->procs.eglBindWaylandDisplayWL(egl->display, wl_display)) {
++		wlr_log(WLR_ERROR, "eglBindWaylandDisplayWL failed");
++		return false;
++	}
++	egl->wl_display = wl_display;
++	return true;
++}
++
++bool wlr_egl_query_wayland_buffer(struct wlr_egl *egl,
++		struct wl_resource *buffer, EGLint attrib, EGLint *value) {
++	if (egl->wl_display == NULL) {
++		return false;
++	}
++	return egl->procs.eglQueryWaylandBufferWL(egl->display, buffer,
++		attrib, value);
++}
++
++EGLImageKHR wlr_egl_create_image_from_wl_buffer(struct wlr_egl *egl,
++		struct wl_resource *buffer) {
++	if (egl->wl_display == NULL) {
++		return EGL_NO_IMAGE_KHR;
++	}
++	const EGLint attribs[] = {
++		EGL_WAYLAND_PLANE_WL, 0,
++		EGL_IMAGE_PRESERVED_KHR, EGL_TRUE,
++		EGL_NONE,
++	};
++	EGLImageKHR image = egl->procs.eglCreateImageKHR(egl->display,
++		EGL_NO_CONTEXT, EGL_WAYLAND_BUFFER_WL, buffer, attribs);
++	if (image == EGL_NO_IMAGE_KHR) {
++		wlr_log(WLR_ERROR, "eglCreateImageKHR failed for a Wayland buffer");
++	}
++	return image;
++}
++
+ EGLImageKHR wlr_egl_create_image_from_dmabuf(struct wlr_egl *egl,
+ 		struct wlr_dmabuf_attributes *attributes, bool *external_only) {
+ 	if (!egl->exts.KHR_image_base || !egl->exts.EXT_image_dma_buf_import) {
+diff --git a/render/gles2/meson.build b/render/gles2/meson.build
+index 2a6db96..3a09362 100644
+--- a/render/gles2/meson.build
++++ b/render/gles2/meson.build
+@@ -12,6 +12,7 @@ wlr_files += files(
+ 	'pixel_format.c',
+ 	'renderer.c',
+ 	'texture.c',
++	'wl_buffer.c',
+ )
+ 
+ subdir('shaders')
+diff --git a/render/gles2/pass.c b/render/gles2/pass.c
+index 149efff..03d0058 100644
+--- a/render/gles2/pass.c
++++ b/render/gles2/pass.c
+@@ -113,9 +113,14 @@ static void set_proj_matrix(GLint loc, float proj[9], const struct wlr_box *box)
+ }
+ 
+ static void set_tex_matrix(GLint loc, enum wl_output_transform trans,
+-		const struct wlr_fbox *box) {
++		const struct wlr_fbox *box, bool flip_y) {
+ 	float tex_matrix[9];
+ 	wlr_matrix_identity(tex_matrix);
++	if (flip_y) {
++		// The texture's origin is at the bottom left: v' = 1 - v
++		wlr_matrix_translate(tex_matrix, 0, 1);
++		wlr_matrix_scale(tex_matrix, 1, -1);
++	}
+ 	wlr_matrix_translate(tex_matrix, box->x, box->y);
+ 	wlr_matrix_scale(tex_matrix, box->width, box->height);
+ 	wlr_matrix_translate(tex_matrix, .5, .5);
+@@ -203,7 +208,8 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+ 	glUniform1i(shader->tex, 0);
+ 	glUniform1f(shader->alpha, alpha);
+ 	set_proj_matrix(shader->proj, pass->projection_matrix, &dst_box);
+-	set_tex_matrix(shader->tex_proj, options->transform, &src_fbox);
++	set_tex_matrix(shader->tex_proj, options->transform, &src_fbox,
++		texture->flip_y);
+ 
+ 	render(&dst_box, options->clip, shader->pos_attrib);
+ 
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index 59681d9..750c8be 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -543,6 +543,7 @@ static void gles2_destroy(struct wlr_renderer *wlr_renderer) {
+ 	}
+ 
+ 	wlr_egl_unset_current(renderer->egl);
++	gles2_renderer_unbind_wl_display(renderer);
+ 	wlr_egl_destroy(renderer->egl);
+ 
+ 	if (renderer->drm_fd >= 0) {
+diff --git a/render/gles2/texture.c b/render/gles2/texture.c
+index b444745..a78b5d7 100644
+--- a/render/gles2/texture.c
++++ b/render/gles2/texture.c
+@@ -349,6 +349,94 @@ static struct wlr_texture *gles2_texture_from_dmabuf_buffer(
+ 	return &texture->wlr_texture;
+ }
+ 
++static struct wlr_texture *gles2_texture_from_wl_buffer(
++		struct wlr_gles2_renderer *renderer, struct wlr_gles2_wl_buffer *buffer) {
++	// Like DMA-BUFs: one EGL image per buffer, re-bound on each commit
++	struct wlr_addon *addon =
++		wlr_addon_find(&buffer->base.addons, renderer, &texture_addon_impl);
++	if (addon != NULL) {
++		struct wlr_gles2_texture *texture =
++			wl_container_of(addon, texture, buffer_addon);
++		if (!gles2_texture_invalidate(texture)) {
++			wlr_log(WLR_ERROR, "Failed to invalidate texture");
++			return NULL;
++		}
++		wlr_buffer_lock(texture->buffer);
++		return &texture->wlr_texture;
++	}
++
++	if (buffer->resource == NULL ||
++			!renderer->procs.glEGLImageTargetTexture2DOES) {
++		return NULL;
++	}
++
++	GLenum target;
++	bool has_alpha;
++	switch (buffer->texture_format) {
++	case EGL_TEXTURE_RGB:
++		target = GL_TEXTURE_2D;
++		has_alpha = false;
++		break;
++	case EGL_TEXTURE_RGBA:
++		target = GL_TEXTURE_2D;
++		has_alpha = true;
++		break;
++	case EGL_TEXTURE_EXTERNAL_WL:
++		if (!renderer->exts.OES_egl_image_external) {
++			return NULL;
++		}
++		target = GL_TEXTURE_EXTERNAL_OES;
++		has_alpha = true;
++		break;
++	default:
++		wlr_log(WLR_ERROR, "Unsupported EGL Wayland buffer format 0x%04X",
++			buffer->texture_format);
++		return NULL;
++	}
++
++	struct wlr_gles2_texture *texture = gles2_texture_create(renderer,
++		buffer->base.width, buffer->base.height);
++	if (texture == NULL) {
++		return NULL;
++	}
++	texture->target = target;
++	texture->has_alpha = has_alpha;
++	texture->flip_y = !buffer->y_inverted;
++	texture->drm_format = DRM_FORMAT_INVALID; // texture can't be written anyways
++
++	struct wlr_egl_context prev_ctx;
++	wlr_egl_save_context(&prev_ctx);
++	wlr_egl_make_current(renderer->egl);
++
++	texture->image = wlr_egl_create_image_from_wl_buffer(renderer->egl,
++		buffer->resource);
++	if (texture->image == EGL_NO_IMAGE_KHR) {
++		wlr_egl_restore_context(&prev_ctx);
++		wl_list_remove(&texture->link);
++		free(texture);
++		return NULL;
++	}
++
++	push_gles2_debug(renderer);
++
++	glGenTextures(1, &texture->tex);
++	glBindTexture(texture->target, texture->tex);
++	glTexParameteri(texture->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++	glTexParameteri(texture->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++	renderer->procs.glEGLImageTargetTexture2DOES(texture->target, texture->image);
++	glBindTexture(texture->target, 0);
++
++	pop_gles2_debug(renderer);
++
++	wlr_egl_restore_context(&prev_ctx);
++
++	texture->buffer = wlr_buffer_lock(&buffer->base);
++	wlr_addon_init(&texture->buffer_addon, &buffer->base.addons,
++		renderer, &texture_addon_impl);
++
++	return &texture->wlr_texture;
++}
++
+ struct wlr_texture *gles2_texture_from_buffer(struct wlr_renderer *wlr_renderer,
+ 		struct wlr_buffer *buffer) {
+ 	struct wlr_gles2_renderer *renderer = gles2_get_renderer(wlr_renderer);
+@@ -357,8 +445,11 @@ struct wlr_texture *gles2_texture_from_buffer(struct wlr_renderer *wlr_renderer,
+ 	uint32_t format;
+ 	size_t stride;
+ 	struct wlr_dmabuf_attributes dmabuf;
++	struct wlr_gles2_wl_buffer *wl_buffer;
+ 	if (wlr_buffer_get_dmabuf(buffer, &dmabuf)) {
+ 		return gles2_texture_from_dmabuf_buffer(renderer, buffer, &dmabuf);
++	} else if ((wl_buffer = gles2_wl_buffer_try_from_buffer(buffer)) != NULL) {
++		return gles2_texture_from_wl_buffer(renderer, wl_buffer);
+ 	} else if (wlr_buffer_begin_data_ptr_access(buffer,
+ 			WLR_BUFFER_DATA_PTR_ACCESS_READ, &data, &format, &stride)) {
+ 		struct wlr_texture *tex = gles2_texture_from_pixels(wlr_renderer,
+diff --git a/render/gles2/wl_buffer.c b/render/gles2/wl_buffer.c
+new file mode 100644
+index 0000000..9be3ddd
+--- /dev/null
++++ b/render/gles2/wl_buffer.c
+@@ -0,0 +1,146 @@
++#include <assert.h>
++#include <stdlib.h>
++#include <wayland-server-core.h>
++#include <wayland-server-protocol.h>
++#include <wlr/interfaces/wlr_buffer.h>
++#include <wlr/util/log.h>
++#include "render/egl.h"
++#include "render/gles2.h"
++#include "types/wlr_buffer.h"
++#include "util/env.h"
++
++/*
++ * wl_buffers created by the EGL implementation's own Wayland protocol, which
++ * the compositor provides by binding its display with
++ * EGL_WL_bind_wayland_display. The Vivante (i.MX) EGL needs this: its clients
++ * only present through wl_viv, not through linux-dmabuf.
++ */
++
++// The EGL display bound to the Wayland display; there is one per compositor
++static struct wlr_egl *bound_egl = NULL;
++
++static const struct wlr_buffer_impl buffer_impl;
++
++static void buffer_destroy(struct wlr_buffer *wlr_buffer) {
++	struct wlr_gles2_wl_buffer *buffer =
++		gles2_wl_buffer_try_from_buffer(wlr_buffer);
++	assert(buffer != NULL);
++	if (buffer->resource != NULL) {
++		wl_list_remove(&buffer->resource_destroy.link);
++	}
++	wl_list_remove(&buffer->release.link);
++	free(buffer);
++}
++
++static const struct wlr_buffer_impl buffer_impl = {
++	.destroy = buffer_destroy,
++};
++
++struct wlr_gles2_wl_buffer *gles2_wl_buffer_try_from_buffer(
++		struct wlr_buffer *wlr_buffer) {
++	if (wlr_buffer->impl != &buffer_impl) {
++		return NULL;
++	}
++	struct wlr_gles2_wl_buffer *buffer =
++		wl_container_of(wlr_buffer, buffer, base);
++	return buffer;
++}
++
++static void buffer_handle_resource_destroy(struct wl_listener *listener,
++		void *data) {
++	struct wlr_gles2_wl_buffer *buffer =
++		wl_container_of(listener, buffer, resource_destroy);
++	wl_list_remove(&buffer->resource_destroy.link);
++	buffer->resource = NULL;
++	wlr_buffer_drop(&buffer->base);
++}
++
++static void buffer_handle_release(struct wl_listener *listener, void *data) {
++	struct wlr_gles2_wl_buffer *buffer =
++		wl_container_of(listener, buffer, release);
++	if (buffer->resource != NULL) {
++		wl_buffer_send_release(buffer->resource);
++	}
++}
++
++static bool buffer_resource_is_instance(struct wl_resource *resource) {
++	EGLint format;
++	return bound_egl != NULL && wlr_egl_query_wayland_buffer(bound_egl,
++		resource, EGL_TEXTURE_FORMAT, &format);
++}
++
++static struct wlr_buffer *buffer_from_resource(struct wl_resource *resource) {
++	struct wl_listener *listener = wl_resource_get_destroy_listener(resource,
++		buffer_handle_resource_destroy);
++	if (listener != NULL) {
++		struct wlr_gles2_wl_buffer *buffer =
++			wl_container_of(listener, buffer, resource_destroy);
++		return &buffer->base;
++	}
++
++	EGLint width, height, format, y_inverted;
++	if (!wlr_egl_query_wayland_buffer(bound_egl, resource, EGL_WIDTH, &width) ||
++			!wlr_egl_query_wayland_buffer(bound_egl, resource, EGL_HEIGHT, &height) ||
++			!wlr_egl_query_wayland_buffer(bound_egl, resource,
++				EGL_TEXTURE_FORMAT, &format)) {
++		wlr_log(WLR_ERROR, "eglQueryWaylandBufferWL failed");
++		return NULL;
++	}
++	// Like Weston: assume the origin is at the top left if the query fails
++	if (!wlr_egl_query_wayland_buffer(bound_egl, resource,
++			EGL_WAYLAND_Y_INVERTED_WL, &y_inverted)) {
++		y_inverted = EGL_TRUE;
++	}
++
++	struct wlr_gles2_wl_buffer *buffer = calloc(1, sizeof(*buffer));
++	if (buffer == NULL) {
++		wlr_log_errno(WLR_ERROR, "Allocation failed");
++		return NULL;
++	}
++	wlr_buffer_init(&buffer->base, &buffer_impl, width, height);
++	buffer->resource = resource;
++	buffer->texture_format = format;
++	buffer->y_inverted = y_inverted;
++
++	buffer->resource_destroy.notify = buffer_handle_resource_destroy;
++	wl_resource_add_destroy_listener(resource, &buffer->resource_destroy);
++
++	buffer->release.notify = buffer_handle_release;
++	wl_signal_add(&buffer->base.events.release, &buffer->release);
++
++	wlr_log(WLR_DEBUG, "EGL Wayland buffer %dx%d, texture format 0x%04X%s",
++		width, height, format, y_inverted ? "" : ", origin at the bottom left");
++	return &buffer->base;
++}
++
++static const struct wlr_buffer_resource_interface buffer_resource_interface = {
++	.name = "wlr_gles2_wl_buffer",
++	.is_instance = buffer_resource_is_instance,
++	.from_resource = buffer_from_resource,
++};
++
++bool gles2_renderer_bind_wl_display(struct wlr_renderer *wlr_renderer,
++		struct wl_display *wl_display) {
++	struct wlr_gles2_renderer *renderer = gles2_get_renderer(wlr_renderer);
++	if (env_parse_bool("WLR_EGL_NO_BIND_DISPLAY")) {
++		wlr_log(WLR_INFO, "WLR_EGL_NO_BIND_DISPLAY set: not binding the "
++			"Wayland display to EGL");
++		return false;
++	}
++	if (bound_egl != NULL ||
++			!wlr_egl_bind_wayland_display(renderer->egl, wl_display)) {
++		return false;
++	}
++	bound_egl = renderer->egl;
++	wlr_buffer_set_fallback_resource_interface(&buffer_resource_interface);
++	wlr_log(WLR_INFO, "Bound the Wayland display to EGL "
++		"(EGL_WL_bind_wayland_display): EGL clients can present");
++	return true;
++}
++
++void gles2_renderer_unbind_wl_display(struct wlr_gles2_renderer *renderer) {
++	if (bound_egl == renderer->egl) {
++		bound_egl = NULL;
++		wlr_buffer_set_fallback_resource_interface(NULL);
++	}
++}
+diff --git a/render/wlr_renderer.c b/render/wlr_renderer.c
+index 2bdcff5..fde4359 100644
+--- a/render/wlr_renderer.c
++++ b/render/wlr_renderer.c
+@@ -20,6 +20,7 @@
+ #if WLR_HAS_GLES2_RENDERER
+ #include <wlr/render/egl.h>
+ #include <wlr/render/gles2.h>
++#include "render/gles2.h"
+ #endif
+ 
+ #if WLR_HAS_VULKAN_RENDERER
+@@ -228,9 +229,18 @@ bool wlr_renderer_init_wl_display(struct wlr_renderer *r,
+ 		return false;
+ 	}
+ 
++	// With EGL_WL_bind_wayland_display, the EGL implementation provides the
++	// protocols of its clients, including its own wl_drm
++	bool egl_bound = false;
++#if WLR_HAS_GLES2_RENDERER
++	if (wlr_renderer_is_gles2(r)) {
++		egl_bound = gles2_renderer_bind_wl_display(r, wl_display);
++	}
++#endif
++
+ 	if (wlr_renderer_get_dmabuf_texture_formats(r) != NULL &&
+ 			wlr_renderer_get_drm_fd(r) >= 0) {
+-		if (wlr_drm_create(wl_display, r) == NULL) {
++		if (!egl_bound && wlr_drm_create(wl_display, r) == NULL) {
+ 			return false;
+ 		}
+ 
+diff --git a/types/buffer/resource.c b/types/buffer/resource.c
+index 294bac1..3f258fd 100644
+--- a/types/buffer/resource.c
++++ b/types/buffer/resource.c
+@@ -7,6 +7,12 @@
+ 
+ /* struct wlr_buffer_resource_interface */
+ static struct wl_array buffer_resource_interfaces = {0};
++static const struct wlr_buffer_resource_interface *fallback_resource_interface;
++
++void wlr_buffer_set_fallback_resource_interface(
++		const struct wlr_buffer_resource_interface *iface) {
++	fallback_resource_interface = iface;
++}
+ 
+ void wlr_buffer_register_resource_interface(
+ 		const struct wlr_buffer_resource_interface *iface) {
+@@ -36,6 +42,11 @@ static const struct wlr_buffer_resource_interface *get_buffer_resource_iface(
+ 		}
+ 	}
+ 
++	if (fallback_resource_interface != NULL &&
++			fallback_resource_interface->is_instance(resource)) {
++		return fallback_resource_interface;
++	}
++
+ 	return NULL;
+ }
+ 
+-- 
+2.34.1
+

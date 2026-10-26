@@ -2,6 +2,11 @@
 # GPU Benchmark (desktop menu): runs glmark2 (OpenGL ES 2.0, Wayland window)
 # in a terminal and keeps the result on screen. The output is also in the
 # journal: journalctl -t glmark2
+if [ -z "${WAYLAND_DISPLAY:-}" ] || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    echo "gpu-benchmark: no Wayland desktop in this session (SSH?)." >&2
+    echo "Start GPU Benchmark from the desktop's application launcher." >&2
+    exit 1
+fi
 echo "glmark2: OpenGL ES 2.0 benchmark (a few minutes; Ctrl+C stops it)"
 echo
 glmark2-es2-wayland "$@" 2>&1 | tee >(systemd-cat -t glmark2 2>/dev/null)

@@ -7,13 +7,11 @@
 # LABWC_RENDERERS (/etc/default/labwc), in order, until one works:
 #
 #   gles2-render  GLES2 renderer on the GPU render node (/dev/dri/renderD128,
-#                 Vivante); the default. OpenGL ES applications get the GPU
-#                 node from the compositor (wl_drm), which the Vivante EGL
-#                 needs to show their windows.
+#                 Vivante); the default.
 #   gles2         GLES2 renderer on the display device (EGL GBM platform on
 #                 the imx-drm KMS node, like Weston; WLR_EGL_SKIP_DEVICE=1).
-#                 The desktop works, but OpenGL ES applications are told to use
-#                 the display device and cannot show windows (v0.1.4).
+#                 With both, wlroots binds the display to EGL, which provides
+#                 Vivante's wl_viv protocol for OpenGL ES applications.
 #   gles2-device  GLES2 with wlroots' EGL device lookup (crashed in v0.0.3;
 #                 only for diagnosis)
 #   pixman        CPU software rendering (always works, slow)
