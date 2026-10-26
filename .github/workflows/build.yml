@@ -24,7 +24,7 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck --severity=warning setup.sh build.sh build-qemu-test/run-kernel-build.sh
+          shellcheck --severity=warning setup.sh build.sh serve-tezi.sh build-qemu-test/run-kernel-build.sh
           shellcheck --severity=warning -s sh \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-session \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-wayland.sh \
@@ -54,7 +54,7 @@ jobs:
           PY
 
       - name: Python
-        run: python3 -m py_compile build-qemu-test/qemu-boot-test.py
+        run: python3 -m py_compile build-qemu-test/qemu-boot-test.py layers/meta-labwc-demo/scripts/nuget-inc.py
 
   yocto:
     needs: lint

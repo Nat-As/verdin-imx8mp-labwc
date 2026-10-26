@@ -1,50 +1,10 @@
-// P/Invoke bindings for the parts of SDL2 and OpenGL ES 2.0 that GPU Test uses.
+// P/Invoke bindings for the parts of EGL, GBM and OpenGL ES that GPU Test uses
+// (the window comes from Avalonia; the off-screen mode uses EGL directly).
 using System;
 using System.Runtime.InteropServices;
 
 namespace GpuTest
 {
-    internal static class Sdl
-    {
-        private const string Lib = "libSDL2-2.0.so.0";
-
-        public const uint INIT_VIDEO = 0x20;
-        public const uint WINDOW_OPENGL = 0x2, WINDOW_SHOWN = 0x4, WINDOW_RESIZABLE = 0x20;
-        public const int WINDOWPOS_CENTERED = 0x2FFF0000;
-        public const uint QUIT = 0x100, KEYDOWN = 0x300;
-        public const int KEY_ESCAPE = 27, KEY_Q = 'q';
-
-        // SDL_GLattr
-        public const int GL_DOUBLEBUFFER = 5, GL_DEPTH_SIZE = 6, GL_MULTISAMPLEBUFFERS = 13,
-            GL_MULTISAMPLESAMPLES = 14, GL_CONTEXT_MAJOR_VERSION = 17, GL_CONTEXT_MINOR_VERSION = 18,
-            GL_CONTEXT_PROFILE_MASK = 21, GL_CONTEXT_PROFILE_ES = 4;
-
-        [StructLayout(LayoutKind.Explicit, Size = 56)]
-        public struct Event
-        {
-            [FieldOffset(0)] public uint Type;
-            [FieldOffset(20)] public int KeySym;    // SDL_KeyboardEvent.keysym.sym
-        }
-
-        [DllImport(Lib, EntryPoint = "SDL_Init")] public static extern int Init(uint flags);
-        [DllImport(Lib, EntryPoint = "SDL_Quit")] public static extern void Quit();
-        [DllImport(Lib, EntryPoint = "SDL_SetHint")] public static extern int SetHint(string name, string value);
-        [DllImport(Lib, EntryPoint = "SDL_GetError")] private static extern IntPtr GetErrorPtr();
-        public static string GetError() => Marshal.PtrToStringAnsi(GetErrorPtr());
-        [DllImport(Lib, EntryPoint = "SDL_GL_SetAttribute")] public static extern int GL_SetAttribute(int attr, int value);
-        [DllImport(Lib, EntryPoint = "SDL_CreateWindow")]
-        public static extern IntPtr CreateWindow(string title, int x, int y, int w, int h, uint flags);
-        [DllImport(Lib, EntryPoint = "SDL_DestroyWindow")] public static extern void DestroyWindow(IntPtr window);
-        [DllImport(Lib, EntryPoint = "SDL_GL_CreateContext")] public static extern IntPtr GL_CreateContext(IntPtr window);
-        [DllImport(Lib, EntryPoint = "SDL_GL_DeleteContext")] public static extern void GL_DeleteContext(IntPtr context);
-        [DllImport(Lib, EntryPoint = "SDL_GL_SetSwapInterval")] public static extern int GL_SetSwapInterval(int interval);
-        [DllImport(Lib, EntryPoint = "SDL_GL_SwapWindow")] public static extern void GL_SwapWindow(IntPtr window);
-        [DllImport(Lib, EntryPoint = "SDL_GL_GetDrawableSize")]
-        public static extern void GL_GetDrawableSize(IntPtr window, out int w, out int h);
-        [DllImport(Lib, EntryPoint = "SDL_PollEvent")] public static extern int PollEvent(out Event e);
-    }
-
-    // EGL, for --headless (off-screen pbuffer, no window system)
     internal static class Egl
     {
         private const string Lib = "libEGL.so.1";
@@ -100,6 +60,9 @@ namespace GpuTest
         public const uint FRAMEBUFFER = 0x8D40, RENDERBUFFER = 0x8D41, COLOR_ATTACHMENT0 = 0x8CE0,
             DEPTH_ATTACHMENT = 0x8D00, FRAMEBUFFER_COMPLETE = 0x8CD5, RGBA8_OES = 0x8058,
             DEPTH_COMPONENT16 = 0x81A5;
+        // OpenGL ES 3.0: multisampled render target, resolved with a blit
+        public const uint READ_FRAMEBUFFER = 0x8CA8, DRAW_FRAMEBUFFER = 0x8CA9, MAX_SAMPLES = 0x8D57,
+            NEAREST = 0x2600;
 
         [DllImport(Lib, EntryPoint = "glClearColor")] public static extern void ClearColor(float r, float g, float b, float a);
         [DllImport(Lib, EntryPoint = "glClear")] public static extern void Clear(uint mask);
@@ -152,5 +115,12 @@ namespace GpuTest
         [DllImport(Lib, EntryPoint = "glFramebufferRenderbuffer")]
         public static extern void FramebufferRenderbuffer(uint target, uint attachment, uint rbTarget, uint rb);
         [DllImport(Lib, EntryPoint = "glCheckFramebufferStatus")] public static extern uint CheckFramebufferStatus(uint target);
+        [DllImport(Lib, EntryPoint = "glDeleteFramebuffers")] public static extern void DeleteFramebuffers(int n, ref uint fb);
+        [DllImport(Lib, EntryPoint = "glDeleteRenderbuffers")] public static extern void DeleteRenderbuffers(int n, ref uint rb);
+        [DllImport(Lib, EntryPoint = "glGetIntegerv")] public static extern void GetIntegerv(uint pname, out int value);
+        [DllImport(Lib, EntryPoint = "glRenderbufferStorageMultisample")]
+        public static extern void RenderbufferStorageMultisample(uint target, int samples, uint format, int w, int h);
+        [DllImport(Lib, EntryPoint = "glBlitFramebuffer")]
+        public static extern void BlitFramebuffer(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1, uint mask, uint filter);
     }
 }

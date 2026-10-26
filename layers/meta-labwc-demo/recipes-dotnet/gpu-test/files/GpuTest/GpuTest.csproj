@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- GPU Test: a rotating cyclohexane molecule rendered with OpenGL ES 2.0
-       (SDL2 window on Wayland), with the measured frame rate. -->
+  <!-- GPU Test: a rotating cyclohexane molecule rendered with OpenGL ES in an
+       Avalonia window (native Wayland backend, GPU rendered), with the
+       measured frame rate. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -12,4 +13,11 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Wayland" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Skia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Simple" Version="12.1.4" />
+  </ItemGroup>
 </Project>

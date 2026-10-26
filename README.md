@@ -38,19 +38,19 @@ OpenCV.
 | Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
 | Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
-| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, OpenGL ES) |
+| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, Avalonia on Wayland, OpenGL ES) |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV (with OpenCL), TensorFlow Lite, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
 | Drivers | All drivers of the Toradex kernel (Mallow peripherals, 7" DSI display, Wi-Fi/Bluetooth), Realtek r8152 USB Ethernet |
 
 ## Download and install
 
-**Pre-release v0.2.0:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar)** (629 MB)
+**Pre-release v0.2.1:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar)** (634 MB)
 
-SHA-256: `2bd275df0e91b557b17bc38c57c05344ee57088d1f7001e00901caac9ff4c3aa`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.2.0),
+SHA-256: `bf029a5e1b4011b1b5a67142c2a26530c49bfcef91469945378304af48245346`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.2.1),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -58,7 +58,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -70,15 +70,23 @@ During boot the displays stay dark while the bootloader and the kernel start (ab
 then show the Alakai logo with a spinner until the desktop takes over. Boot messages go to the
 serial console (Mallow USB debug port) only.
 
-<details>
-<summary>Installing over the network instead of a USB stick</summary>
+### Installing over the USB cable (no USB stick)
 
-1. Extract the tarball on a PC and serve the folder that contains it:
-   `python3 -m http.server 8000`
-2. In Tezi, open **Feeds** and add
-   `http://<pc-ip>:8000/Verdin-iMX8MP_labwc-Demo-Image-Tezi_<version>/image.json`, then install as above.
+In recovery mode, Tezi also runs a network over the USB OTG cable (USB NCM/RNDIS): the module is
+`192.168.11.1` and the PC gets `192.168.11.2`. `serve-tezi.sh` (in this repository) serves an
+image to Tezi over that link and announces it with Zeroconf, so Tezi lists it by itself:
 
-</details>
+```sh
+./serve-tezi.sh v0.2.1                      # release/v0.2.1/...Tezi_v0.2.1.tar
+./serve-tezi.sh build                       # the current build
+./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar
+```
+
+Then install it in Tezi as above; Ctrl+C stops the server when Tezi has finished. The script
+extracts the image to `release/serve/` and serves it on port 8080 with Python's web server; the
+Zeroconf announcement needs `avahi-publish` (`avahi-utils`). Without it, add the feed in Tezi
+(**Feeds**) as `http://192.168.11.2:8080/image_list.json`. `TEZI_HOST_IP` and `TEZI_PORT` change
+the address and port, for example to serve over Ethernet.
 
 ## Build
 
@@ -256,9 +264,12 @@ of the `video` group (the desktop user is) or as root.
 dotnet new console -o hello && cd hello && dotnet run
 ```
 
-**GPU Test** (in the application launcher, or `gpu-test`) is a C# demo: a rotating cyclohexane
-molecule rendered with OpenGL ES 2.0 on the GPU, with the measured frame rate in the top right
-corner (normally the display refresh rate). `gpu-test --no-vsync` renders as fast as it can, and
+**GPU Test** (in the application launcher, or `gpu-test`) is a C# demo built with
+[Avalonia](https://avaloniaui.net) 12.1: a rotating cyclohexane molecule rendered with OpenGL ES on
+the GPU, with the measured frame rate in the top right corner, in a window with a 40 % opaque
+background. It uses Avalonia's native Wayland backend (`Avalonia.Wayland`, `UseWayland()`), which
+renders the whole window with OpenGL ES through EGL, so no X server is needed and the UI stays
+hardware accelerated. The window runs at up to 60 FPS (`GPU_TEST_MAX_FPS=<n>`, `0` for no limit);
 `gpu-test --headless` measures the GPU without a window. **GPU Benchmark** in the launcher
 (`gpu-benchmark`) runs glmark2 in a window and keeps its terminal open with the score.
 Both log to the journal: `journalctl -t gpu-test`, `journalctl -t glmark2`.

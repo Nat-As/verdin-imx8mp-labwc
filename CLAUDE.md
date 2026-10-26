@@ -30,6 +30,9 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
      from asset names, hence the rename)
    - `...tar.sha256`, `labwc-Demo-Image-vX.Y.Z.manifest.txt` (image `.manifest`), `release-notes.md`
 4. Update README.md (version, link, size, SHA-256), commit locally, hand the tarball to the user.
+   The user installs it over the USB NCM link of Tezi (module 192.168.11.1, host 192.168.11.2):
+   `./serve-tezi.sh vX.Y.Z` serves it over HTTP (port 8080) and announces it with Zeroconf
+   (`_tezi._tcp`), so Tezi lists it by itself (verified with Tezi on hardware). Ctrl+C stops it.
 5. **After the user confirms the hardware test**: `git push origin main`, wait for CI (`gh run watch`)
    to be green, `git tag -a vX.Y.Z` + `git push origin vX.Y.Z`,
    `gh release create vX.Y.Z --prerelease --notes-file release/vX.Y.Z/release-notes.md <assets>`,
@@ -52,6 +55,8 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 |---|---|
 | `setup.sh` | `repo init/sync`: Toradex BSP **7.7.0** (`tdxref/default.xml`) + `manifests/labwc-demo.xml` (meta-wayland, meta-qt6 6.11, NXP meta-imx `scarthgap-6.6.52-2.2.2`, all pinned; only `meta-imx/meta-imx-ml` is in `bblayers.conf`) |
 | `build.sh` | Logged `bitbake -k labwc-demo-image` |
+| `serve-tezi.sh` | Serve a release/build Tezi image to Toradex Easy Installer over the network (USB NCM) |
+| `layers/meta-labwc-demo/scripts/nuget-inc.py` | Generate a recipe's pinned NuGet `SRC_URI` `.inc` from a host restore |
 | `config/image-packages.conf`, `config/python-packages.conf` | Software lists (included from `build/conf/local.conf`) |
 | `config/release.conf` | Image version `LABWC_DEMO_VERSION` (boot animation title, `/etc/argos-release`) |
 | `docs/logos/` | Logos of the stack for the README (white tiles, readable in light and dark themes) |
@@ -110,10 +115,25 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   dotnet-native (portable IL, `UseAppHost=false`, offline) into `${libdir}/<app>` + launcher.
   `opencvsharp` 4.6.0.20220608 (matches NXP OpenCV 4.6): native OpenCvSharpExtern built from git,
   managed dll + offline feed from nuget.org nupkgs (`/usr/share/nuget/opencvsharp-feed`).
-  Apps: `gpu-test` (C#, SDL2 + GLES2 P/Invoke; `--headless` renders into an FBO on a surfaceless
-  context of the EGL GBM platform on `/dev/dri/renderD*`, since Vivante has no default EGL display
-  outside Wayland; tested on the host with Mesa) and `opencv-cs-check` (OpenCL via mangled
-  `cv::ocl` symbols).
+  Apps: `gpu-test` and `opencv-cs-check` (OpenCL via mangled `cv::ocl` symbols).
+- GPU Test (v0.2.1): Avalonia 12.1.4 with its native Wayland backend (`Avalonia.Wayland`,
+  `UseWayland()`, opt-in since 12.1; EGL + OpenGL ES, `GlProfiles` forced to GLES 3.0/2.0 because
+  on Mesa Avalonia picks desktop GL 4.x, where our GLSL ES shaders crash). Molecule in an
+  `OpenGlControlBase` (`MoleculeRenderer`: own 4x MSAA FBO + depth, blit-resolved into Avalonia's
+  FBO, transparent clear), Avalonia text overlay, window background 40 % opaque. Avalonia's
+  Wayland render loop doesn't wait for the display (thousands of FPS on Mesa), so a pacer thread
+  requests frames at `GPU_TEST_MAX_FPS` (default 60). `GPU_TEST_DMABUF=1` sets
+  `UseDmabufSwapchain` (default off: wl_egl_window, the path proven on Vivante). `--headless`
+  keeps the EGL GBM FBO path (Vivante has no default EGL display outside Wayland).
+  NuGet: `dotnet restore -r linux-arm64`, then `scripts/nuget-inc.py` writes
+  `gpu-test-nuget.inc` (21 pinned nupkgs into `${WORKDIR}/nuget-feed`); the dotnet class restores
+  only from that feed and builds `-r linux-arm64 --self-contained false` (only arm64
+  libSkiaSharp/libHarfBuzzSharp). Avalonia 12 needs `UseHarfBuzz()` (`Avalonia.HarfBuzz`).
+  Avalonia.Wayland requires xdg_wm_base >= 3; labwc 0.7.1 offered v2, so the labwc bbappend
+  backports upstream a98f2635 (xdg-shell v3 with popup repositioning, in labwc 0.7.3).
+- Serial ports from C#: .NET 10's `System.IO.Ports` NuGet package (with
+  `runtime.linux-arm64.runtime.native.System.IO.Ports`) covers it; the user decided against Mono
+  and RJCP SerialPortStream (v0.2.1).
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
