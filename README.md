@@ -12,11 +12,25 @@ shows on the **Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enable
 
 The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (Vulkan, OpenGL ES,
 OpenCL, OpenVX, G2D, TensorFlow Lite with the NPU delegate, hardware video codecs), so it can be
-used as the base for GUI- and machine-learning-heavy applications.
+used as the base for GUI- and machine-learning-heavy applications, including C# applications on
+.NET with OpenCV.
+
+<p>
+  <a href="https://wayland.freedesktop.org"><img src="docs/logos/wayland.png" height="34" alt="Wayland" title="Wayland"></a>
+  <a href="https://www.khronos.org/opengles/"><img src="docs/logos/opengles.png" height="34" alt="OpenGL ES" title="OpenGL ES"></a>
+  <a href="https://www.vulkan.org"><img src="docs/logos/vulkan.png" height="34" alt="Vulkan" title="Vulkan"></a>
+  <a href="https://www.khronos.org/opencl/"><img src="docs/logos/opencl.png" height="34" alt="OpenCL" title="OpenCL"></a>
+  <a href="https://www.khronos.org/openvx/"><img src="docs/logos/openvx.png" height="34" alt="OpenVX" title="OpenVX"></a>
+  <a href="https://opencv.org"><img src="docs/logos/opencv.png" height="34" alt="OpenCV" title="OpenCV"></a>
+  <a href="https://www.tensorflow.org/lite"><img src="docs/logos/tensorflow.png" height="34" alt="TensorFlow Lite" title="TensorFlow Lite"></a>
+  <a href="https://dotnet.microsoft.com"><img src="docs/logos/dotnet.png" height="34" alt=".NET" title=".NET"></a>
+  <a href="https://www.qt.io"><img src="docs/logos/qt.png" height="34" alt="Qt" title="Qt"></a>
+  <a href="https://gstreamer.freedesktop.org"><img src="docs/logos/gstreamer.png" height="34" alt="GStreamer" title="GStreamer"></a>
+</p>
 
 | | Included |
 |---|---|
-| Boot | Boot splash (Alakai logo and spinner) from the moment the display comes up until the desktop is ready; no kernel or boot messages on the screen |
+| Boot | Boot animation (Alakai logo, spinner and image version) from the moment the display comes up until the desktop is ready; no kernel or boot messages on the screen |
 | Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (OpenGL ES), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
 | GPU | Vivante GC7000UL: Vulkan, OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `vulkaninfo`, `clinfo`, `glmark2`, `gmem_info` |
 | NPU | 2.3 TOPS NPU: OpenVX with NN extensions, RapidOpenVX, TIM-VX, TensorFlow Lite 2.16 (C++ and Python `tflite_runtime`) with the VX delegate |
@@ -25,18 +39,19 @@ used as the base for GUI- and machine-learning-heavy applications.
 | Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
 | Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
+| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, OpenGL ES) |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV (with OpenCL), TensorFlow Lite, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
 | Drivers | All drivers of the Toradex kernel (Mallow peripherals, 7" DSI display, Wi-Fi/Bluetooth), Realtek r8152 USB Ethernet |
 
 ## Download and install
 
-**Pre-release v0.1.3:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar)** (458 MB)
+**Pre-release v0.1.4:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.4/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar)** (631 MB)
 
-SHA-256: `709e150f5431aa1a23cbd584da7ec568dd49148bf87a137825563332b9b86592`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.3),
+SHA-256: `bba1c6e7a9df98d3296b60d135cf710cf587c6bf185ea1ed838a455c4cd04ae7`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.4/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.4),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -44,7 +59,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -94,6 +109,7 @@ The software in the image is listed in two config files. Edit them and run `./bu
 |---|---|
 | [`config/image-packages.conf`](config/image-packages.conf) | Applications, tools, networking, development tools, Qt, drivers, and packages to leave out |
 | [`config/python-packages.conf`](config/python-packages.conf) | Python libraries |
+| [`config/release.conf`](config/release.conf) | Image version, shown on the boot animation and in `/etc/argos-release` |
 
 Entries are Yocto package names, one per line. To find a package, search the
 [OpenEmbedded layer index](https://layers.openembedded.org/layerindex/branch/scarthgap/recipes/)
@@ -204,15 +220,19 @@ doesn't give the display the fence it would need to wait by itself; without the 
 are being redrawn (for example a running `htop`) can flash black. `LABWC_RENDER_FINISH=0` in
 `/etc/default/labwc` turns the wait off.
 
-`vk-scanout-test` (no root needed, the desktop can keep running) writes into display buffers with
-different Vulkan operations and reads the memory back the way the display controller sees it. A
-position-encoding pattern shows not only whether the data arrived but also whether it landed in the
-wrong layout (tiled). The result says which `vulkan*` strategy fits; `-v` prints sample pixels.
+`sudo vk-scanout-test` (the desktop can keep running) writes into display buffers with different
+Vulkan operations and reads the memory back the way the display controller sees it, and through the
+GPU (OpenGL ES). OpenGL ES, the desktop's working path, is tested as a control, and so is a buffer
+that Vulkan allocates itself. A position-encoding pattern shows not only whether the data arrived
+but also whether it landed in the wrong (tiled) layout. The result says which `vulkan*` strategy
+fits; `-v` prints sample pixels, and `-k` (desktop stopped) shows colour bars on the display for
+each path and asks what you see.
 
 `sudo labwc-gpu-probe` runs `vk-scanout-test`, then starts labwc once per renderer (off-screen,
-the desktop keeps running) and prints which ones start, with a gdb backtrace for any crash. `sudo labwc-gpu-probe --kms` tests
-them on the real displays: it shows a white test window with each renderer and asks whether you
-saw it (the desktop is stopped for about a minute).
+the desktop keeps running) and prints which ones start, with a gdb backtrace for any crash.
+`sudo labwc-gpu-probe --kms` also runs the on-display colour-bar test and tests the renderers on the
+real displays: it shows a white test window with each renderer and asks whether you saw it (the
+desktop is stopped for a few minutes).
 
 **NPU.** TensorFlow Lite models run on the NPU through the VX delegate
 (`/usr/lib/libvx_delegate.so`):
@@ -235,11 +255,38 @@ graph between runs, set `VIV_VX_ENABLE_CACHE_GRAPH_BINARY=1` and
 on the NPU. C/C++ programs can use OpenVX (`<VX/vx.h>`, `-lOpenVX`), RapidOpenVX or TIM-VX
 directly; the headers are installed.
 
-**OpenCL and OpenCV.** OpenCV uses the GPU through OpenCL for `cv::UMat` operations
-(`cv2.UMat` in Python). Check it with
+**OpenCL and OpenCV.** OpenCV 4.6 (NXP's i.MX build) uses the GPU through OpenCL for
+`cv::UMat` operations (`cv2.UMat` in Python). Check it with
 `python3 -c "import cv2; print(cv2.ocl.haveOpenCL(), cv2.ocl.Device.getDefault().name())"`.
-Programs that need GPU access (`/dev/galcore`) must run as a member of the `video` group (the
-desktop user is) or as root.
+C++ programs build with `pkg-config --cflags --libs opencv4`; the OpenCV samples are in
+`/usr/share/opencv4/samples/`. Programs that need GPU access (`/dev/galcore`) must run as a member
+of the `video` group (the desktop user is) or as root.
+
+### C# and .NET
+
+.NET 10 (LTS) is installed with its SDK, so C# programs can be built and run on the board:
+
+```sh
+dotnet new console -o hello && cd hello && dotnet run
+```
+
+**GPU Test** (in the application launcher, or `gpu-test`) is a C# demo: a rotating cyclohexane
+molecule rendered with OpenGL ES 2.0 on the GPU, with the measured frame rate in the top right
+corner (normally the display refresh rate). `gpu-test --no-vsync` renders as fast as it can, and
+`gpu-test --headless` measures the GPU without a window.
+
+**OpenCV from C#** uses [OpenCvSharp](https://github.com/shimat/opencvsharp) 4.6.0.20220608, the
+release that matches the image's OpenCV 4.6. Its native part (`libOpenCvSharpExtern.so`) is built
+against the image's OpenCV with OpenCL, so `UMat` operations run on the GPU. `opencv-cs-check`
+prints the OpenCV build and times a blur on the CPU and with OpenCL. To use OpenCvSharp in your own
+project, add the package from the offline feed in the image:
+
+```sh
+dotnet add package OpenCvSharp4 --version 4.6.0.20220608 --source /usr/share/nuget/opencvsharp-feed
+```
+
+Do not add the `OpenCvSharp4.runtime.*` packages: the native library comes with the image. The
+source of `opencv-cs-check` is in `/usr/share/dotnet-examples/OpenCvCheck/` as an example.
 
 ### Configuration
 
@@ -307,3 +354,7 @@ The image also contains third-party software under its own licenses, including G
 NXP proprietary GPU/VPU firmware and libraries under the NXP Software License Agreement, which
 Tezi shows before installing. License texts for every package are installed in
 `/usr/share/common-licenses/` on the board.
+
+The logos above are trademarks of their owners (OpenGL ES, Vulkan, OpenCL and OpenVX: The Khronos
+Group; OpenCV: OpenCV team; TensorFlow: Google; .NET: Microsoft; Qt: The Qt Company; Wayland and
+GStreamer: their projects) and only identify the software that the image uses.

@@ -14,11 +14,12 @@ SRC_URI = " \
     file://fill.vert \
     file://fill.frag \
     file://pattern.frag \
+    file://bars.frag \
 "
 
 S = "${WORKDIR}"
 
-DEPENDS = "vulkan-loader vulkan-headers virtual/libgbm libdrm glslang-native"
+DEPENDS = "vulkan-loader vulkan-headers virtual/libgbm virtual/egl virtual/libgles2 libdrm glslang-native"
 
 inherit pkgconfig
 
@@ -29,9 +30,10 @@ do_compile() {
     glslangValidator -V --vn fill_vert -o fill_vert.h ${S}/fill.vert
     glslangValidator -V --vn fill_frag -o fill_frag.h ${S}/fill.frag
     glslangValidator -V --vn pattern_frag -o pattern_frag.h ${S}/pattern.frag
+    glslangValidator -V --vn bars_frag -o bars_frag.h ${S}/bars.frag
     ${CC} ${CFLAGS} ${LDFLAGS} -Wall -Wextra -Wno-unused-parameter -I. \
         $(pkg-config --cflags libdrm) ${S}/vk-scanout-test.c -o vk-scanout-test \
-        -lvulkan -lgbm -ldrm
+        -lvulkan -lgbm -ldrm -lEGL -lGLESv2
 }
 
 do_install() {

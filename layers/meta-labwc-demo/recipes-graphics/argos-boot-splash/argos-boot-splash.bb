@@ -16,9 +16,13 @@ S = "${WORKDIR}"
 
 THEME_DIR = "${datadir}/plymouth/themes/argos"
 
+LABWC_DEMO_VERSION ??= "0.0.0"
+
 do_install() {
     install -d ${D}${THEME_DIR}
-    install -m 0644 ${WORKDIR}/argos.plymouth ${D}${THEME_DIR}/argos.plymouth
+    # Release version on the boot animation (config/release.conf)
+    sed -e 's/@VERSION@/${LABWC_DEMO_VERSION}/g' ${WORKDIR}/argos.plymouth > ${D}${THEME_DIR}/argos.plymouth
+    chmod 0644 ${D}${THEME_DIR}/argos.plymouth
     install -m 0644 ${WORKDIR}/theme/*.png ${D}${THEME_DIR}/
     # Password/entry dialog images (needed by the two-step plugin) from
     # Plymouth's spinner theme

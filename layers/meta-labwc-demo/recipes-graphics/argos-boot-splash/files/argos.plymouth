@@ -6,7 +6,7 @@ ModuleName=two-step
 [two-step]
 ImageDir=/usr/share/plymouth/themes/argos
 Font=DejaVu Sans 12
-TitleFont=DejaVu Sans 24
+TitleFont=DejaVu Sans 13
 # Logo slightly above the middle, spinner below it
 WatermarkHorizontalAlignment=.5
 WatermarkVerticalAlignment=.42
@@ -14,8 +14,9 @@ HorizontalAlignment=.5
 VerticalAlignment=.75
 DialogHorizontalAlignment=.5
 DialogVerticalAlignment=.75
+# The release version (Title of [boot-up]) at the bottom
 TitleHorizontalAlignment=.5
-TitleVerticalAlignment=.25
+TitleVerticalAlignment=.94
 MessageBelowAnimation=true
 Transition=none
 TransitionDuration=0.0
@@ -26,6 +27,7 @@ ProgressBarForegroundColor=0xb70505
 
 [boot-up]
 UseEndAnimation=false
+Title=v@VERSION@
 
 [shutdown]
 UseEndAnimation=false

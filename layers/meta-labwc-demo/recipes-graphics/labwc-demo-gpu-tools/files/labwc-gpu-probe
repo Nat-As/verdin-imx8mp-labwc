@@ -101,10 +101,15 @@ echo
 have_gdb=0
 command -v gdb >/dev/null 2>&1 && have_gdb=1
 
-# Which Vulkan operations reach a display buffer's memory (no display needed)
+# Which Vulkan operations reach a display buffer's memory. With --kms also
+# on the display: colour bars per write path, answered interactively.
 if command -v vk-scanout-test >/dev/null 2>&1; then
     echo "== vk-scanout-test (Vulkan writes into a display buffer)"
-    timeout 120 vk-scanout-test ${kms_card:+-d $kms_card} 2>&1 | tee "$outdir/vk-scanout-test.log" | sed 's/^/   /'
+    if [ "$KMS" = 1 ] && [ -t 0 ]; then
+        vk-scanout-test -v -k ${kms_card:+-d $kms_card}
+    else
+        timeout 120 vk-scanout-test -v ${kms_card:+-d $kms_card} 2>&1 | tee "$outdir/vk-scanout-test.log" | sed 's/^/   /'
+    fi
     echo
 fi
 

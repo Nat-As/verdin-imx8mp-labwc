@@ -19,7 +19,9 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 
 ## Release workflow
 
-1. Change the layer/config, run `./build.sh` (log: `build-logs/latest.log`), fix failures.
+1. Set the new version in `config/release.conf` (`LABWC_DEMO_VERSION`; shown on the boot animation
+   and in `/etc/argos-release`). Change the layer/config, run `./build.sh` (log:
+   `build-logs/latest.log`), fix failures.
 2. Verify locally: inspect the rootfs (`build/tmp/work/verdin_imx8mp-tdx-linux/labwc-demo-image/1.0/rootfs`)
    and run the QEMU boot test (see "Testing").
 3. Stage the release assets in `release/vX.Y.Z/` (git-ignored):
@@ -51,6 +53,8 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 | `setup.sh` | `repo init/sync`: Toradex BSP **7.7.0** (`tdxref/default.xml`) + `manifests/labwc-demo.xml` (meta-wayland, meta-qt6 6.11, NXP meta-imx `scarthgap-6.6.52-2.2.2`, all pinned; only `meta-imx/meta-imx-ml` is in `bblayers.conf`) |
 | `build.sh` | Logged `bitbake -k labwc-demo-image` |
 | `config/image-packages.conf`, `config/python-packages.conf` | Software lists (included from `build/conf/local.conf`) |
+| `config/release.conf` | Image version `LABWC_DEMO_VERSION` (boot animation title, `/etc/argos-release`) |
+| `docs/logos/` | Logos of the stack for the README (white tiles, readable in light and dark themes) |
 | `build/conf/local.conf` | MACHINE, EULA, threads, Fortran toolchain, display overlays (7" DSI + HDMI) |
 | `layers/meta-labwc-demo` | Our layer: image, labwc session, users, bbappends, backported recipes |
 | `layers/meta-labwc-demo/conf/layer.conf` | Account names (`LABWC_DEMO_DESKTOP_USER`, `LABWC_DEMO_ADMIN_USER`) |
@@ -100,6 +104,18 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   plymouth-quit/getty@tty1; `labwc-splash` deactivates Plymouth before labwc and quits it
   (`--retain-splash`) when labwc-session writes `/tmp/labwc-session-<uid>/ready`. U-Boot has no
   video support for this board (no LCDIFv3/DSIM/SN65DSI83 drivers): dark until the kernel.
+- .NET (v0.1.4): own recipe `recipes-devtools/dotnet/dotnet_10.0.403.bb` (.NET 10 LTS binary SDK,
+  runtime 10.0.14; based on meta-mono's, which only has 8.0.7; target: runtime + `dotnet-dev`
+  SDK, plus `native` for building). `classes/labwc-demo-dotnet.bbclass` builds C# projects with
+  dotnet-native (portable IL, `UseAppHost=false`, offline) into `${libdir}/<app>` + launcher.
+  `opencvsharp` 4.6.0.20220608 (matches NXP OpenCV 4.6): native OpenCvSharpExtern built from git,
+  managed dll + offline feed from nuget.org nupkgs (`/usr/share/nuget/opencvsharp-feed`).
+  Apps: `gpu-test` (C#, SDL2 + GLES2 P/Invoke, `--headless` EGL pbuffer mode for testing; tested
+  on the host with Mesa `EGL_PLATFORM=surfaceless`) and `opencv-cs-check` (OpenCL via mangled
+  `cv::ocl` symbols).
+- vk-scanout-test v0.1.4: GLES (EGLImage) readback + GLES write control for GBM BOs,
+  Vulkan-allocated exported LINEAR buffer (mode "export"), `-k` on-display colour-bar test (needs
+  DRM master: run from `labwc-gpu-probe --kms`).
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm

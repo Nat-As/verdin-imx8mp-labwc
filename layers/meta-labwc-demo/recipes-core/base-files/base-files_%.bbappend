@@ -5,3 +5,9 @@
 do_install:append() {
     rm -f ${D}${sysconfdir}/profile.d/x11-display-var.sh
 }
+
+# Release version of the image (config/release.conf), for scripts and support
+LABWC_DEMO_VERSION ??= "0.0.0"
+do_install:append() {
+    printf 'NAME="Argos labwc demo image"\nVERSION=%s\n' "${LABWC_DEMO_VERSION}" > ${D}${sysconfdir}/argos-release
+}

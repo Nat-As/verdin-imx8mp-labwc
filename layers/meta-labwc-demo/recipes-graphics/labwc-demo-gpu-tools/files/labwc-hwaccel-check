@@ -19,6 +19,7 @@ INFO() { printf '[INFO] %-14s %s\n' "$1" "$2"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 [ "$(id -u)" -eq 0 ] || INFO "user" "not root: some checks are limited (run with sudo)"
+[ -r /etc/argos-release ] && INFO "image" "v$(sed -n 's/^VERSION=//p' /etc/argos-release)"
 
 TFLITE_DIR=$(ls -d /usr/bin/tensorflow-lite-*/examples 2>/dev/null | head -n1)
 VX_DELEGATE=/usr/lib/libvx_delegate.so
@@ -108,6 +109,21 @@ EOF
     elif [ "$ocv_ok" = True ]; then PASS "opencv-ocl" "OpenCV $ocv_ver, OpenCL device: $ocv_dev"
     elif [ -z "$ocv" ]; then FAIL "opencv-ocl" "OpenCV $ocv_ver (OpenCL build: $ocv_built): the OpenCL query crashed"
     else FAIL "opencv-ocl" "OpenCV $ocv_ver (OpenCL build: $ocv_built): no OpenCL device"; fi
+fi
+
+# --- .NET and OpenCV from C# -----------------------------------------------------
+if have dotnet; then
+    rt=$(dotnet --list-runtimes 2>/dev/null | awk '/Microsoft.NETCore.App/ {print $2}' | tail -n1)
+    [ -n "$rt" ] && PASS "dotnet" ".NET runtime $rt, SDK $(dotnet --version 2>/dev/null || echo 'not installed')" \
+        || FAIL "dotnet" "no .NET runtime"
+fi
+if have opencv-cs-check; then
+    cs=$(timeout 120 opencv-cs-check -q 2>/dev/null)
+    case $cs in
+    opencl) PASS "opencv-cs" "OpenCV from C# (OpenCvSharp) uses OpenCL on the GPU (details: opencv-cs-check)" ;;
+    cpu)    WARN "opencv-cs" "OpenCV from C# works, but without OpenCL (CPU only)" ;;
+    *)      FAIL "opencv-cs" "OpenCV from C# (OpenCvSharp) failed: run opencv-cs-check" ;;
+    esac
 fi
 
 # --- OpenVX / NPU -----------------------------------------------------------------
