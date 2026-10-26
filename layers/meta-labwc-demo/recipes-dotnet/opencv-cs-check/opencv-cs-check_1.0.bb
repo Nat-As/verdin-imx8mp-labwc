@@ -1,7 +1,7 @@
 SUMMARY = "OpenCV from C# (OpenCvSharp) with OpenCL: check and example"
 DESCRIPTION = "Small C# program that uses OpenCV through OpenCvSharp: prints \
-the OpenCV build and OpenCL status and times a Gaussian blur on the CPU and \
-on the GPU (OpenCL, UMat). Its source is installed as an example project in \
+the OpenCV build and OpenCL status and times a small vision pipeline \
+(grayscale, Gaussian blur, Canny) on the CPU and on the GPU (OpenCL, UMat). Its source is installed as an example project in \
 ${datadir}/dotnet-examples/OpenCvCheck."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"

@@ -4,25 +4,17 @@
 # Renderer: labwc-session tries these renderer strategies in order and falls
 # back to the next one if labwc crashes, hangs or logs renderer errors during
 # startup (see /usr/bin/labwc-session):
-#   gles2         OpenGL ES 2 renderer on the display device (as Weston does)
-#   gles2-render  OpenGL ES 2 renderer on the GPU render node
+#   gles2-render  OpenGL ES 2 renderer on the GPU render node (default; OpenGL
+#                 ES applications can show their windows)
+#   gles2         OpenGL ES 2 renderer on the display device (as Weston does;
+#                 OpenGL ES applications cannot show windows)
 #   pixman        software rendering on the CPU (slow, always works)
-#   Vulkan strategies (EXPERIMENTAL, not used by default):
-#   vulkan-auto   picks one of the following with vk-scanout-test, or none
-#   vulkan-buffer renders off-screen, copies into display memory through a
-#                 VkBuffer (for drivers that write images tiled, like Vivante)
-#   vulkan-copy   renders off-screen, copies with vkCmdCopyImage
-#   vulkan        renders into the display buffers directly (black screen on
-#                 the i.MX8MP)
-#   vulkan-noforeign  vulkan without queue ownership transfers
 # Default order:
-#LABWC_RENDERERS="gles2 gles2-render pixman"
-# To try Vulkan first:
-#LABWC_RENDERERS="vulkan-auto gles2 pixman"
+#LABWC_RENDERERS="gles2-render gles2 pixman"
 # Check which one is in use with labwc-hwaccel-check, and which ones show a
 # picture with: sudo labwc-gpu-probe --kms
 #
-# Or force a single wlroots renderer (no fallback): gles2, vulkan or pixman.
+# Or force a single wlroots renderer (no fallback): gles2 or pixman.
 #WLR_RENDERER=pixman
 #
 # Seconds after startup during which a failure moves on to the next strategy

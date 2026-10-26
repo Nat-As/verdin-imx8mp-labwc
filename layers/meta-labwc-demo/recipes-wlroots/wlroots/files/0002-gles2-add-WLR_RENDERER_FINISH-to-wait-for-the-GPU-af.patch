@@ -1,7 +1,7 @@
-From 404c51197ec5e43dfdf21732a7d0d04117b939f6 Mon Sep 17 00:00:00 2001
+From 2afb7ed9e358b57dfbad4031ce15db2bfd1ce4ad Mon Sep 17 00:00:00 2001
 From: Nat-As <42288915+Nat-As@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 10:48:32 -0400
-Subject: [PATCH 3/4] gles2: add WLR_RENDERER_FINISH to wait for the GPU after
+Subject: [PATCH 2/2] gles2: add WLR_RENDERER_FINISH to wait for the GPU after
  each frame
 
 On drivers that don't attach implicit-sync fences to the rendered DMA-BUF

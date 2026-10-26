@@ -10,6 +10,7 @@ SRC_URI = " \
     file://GpuTest/ \
     file://gpu-test.desktop \
     file://gpu-test.png \
+    file://gpu-test.sh \
 "
 
 S = "${WORKDIR}"
@@ -17,8 +18,11 @@ S = "${WORKDIR}"
 inherit labwc-demo-dotnet
 
 DOTNET_PROJECT = "GpuTest/GpuTest.csproj"
+# Own launcher (logs to the journal when started from the desktop)
+DOTNET_LAUNCHER = ""
 
 do_install:append() {
+    install -Dm0755 ${WORKDIR}/gpu-test.sh ${D}${bindir}/gpu-test
     install -Dm0644 ${WORKDIR}/gpu-test.desktop ${D}${datadir}/applications/gpu-test.desktop
     install -Dm0644 ${WORKDIR}/gpu-test.png ${D}${datadir}/icons/hicolor/128x128/apps/gpu-test.png
 }

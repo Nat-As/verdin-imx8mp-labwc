@@ -54,7 +54,11 @@ namespace GpuTest
             CONTEXT_CLIENT_VERSION = 0x3098;
         public const uint OPENGL_ES_API = 0x30A0;
 
+        public const int PLATFORM_GBM_KHR = 0x31D7;
         [DllImport(Lib, EntryPoint = "eglGetDisplay")] public static extern IntPtr GetDisplay(IntPtr nativeDisplay);
+        // EGL 1.5
+        [DllImport(Lib, EntryPoint = "eglGetPlatformDisplay")]
+        public static extern IntPtr GetPlatformDisplay(int platform, IntPtr nativeDisplay, IntPtr attribs);
         [DllImport(Lib, EntryPoint = "eglInitialize")] public static extern uint Initialize(IntPtr dpy, out int major, out int minor);
         [DllImport(Lib, EntryPoint = "eglBindAPI")] public static extern uint BindAPI(uint api);
         [DllImport(Lib, EntryPoint = "eglChooseConfig")]
@@ -67,6 +71,15 @@ namespace GpuTest
         public static extern uint MakeCurrent(IntPtr dpy, IntPtr draw, IntPtr read, IntPtr ctx);
         [DllImport(Lib, EntryPoint = "eglSwapBuffers")] public static extern uint SwapBuffers(IntPtr dpy, IntPtr surface);
         [DllImport(Lib, EntryPoint = "eglGetError")] public static extern int GetError();
+    }
+
+    // GBM on the GPU render node, for --headless (the Vivante EGL has no
+    // default display outside Wayland)
+    internal static class Gbm
+    {
+        [DllImport("libgbm.so.1", EntryPoint = "gbm_create_device")] public static extern IntPtr CreateDevice(int fd);
+        [DllImport("libc", EntryPoint = "open")] public static extern int Open(string path, int flags);
+        public const int O_RDWR = 2, O_CLOEXEC = 0x80000;
     }
 
     internal static unsafe class Gl
@@ -84,6 +97,9 @@ namespace GpuTest
         public const uint TRIANGLES = 0x0004;
         public const uint RGBA = 0x1908;
         public const uint VENDOR = 0x1F00, RENDERER = 0x1F01, VERSION = 0x1F02;
+        public const uint FRAMEBUFFER = 0x8D40, RENDERBUFFER = 0x8D41, COLOR_ATTACHMENT0 = 0x8CE0,
+            DEPTH_ATTACHMENT = 0x8D00, FRAMEBUFFER_COMPLETE = 0x8CD5, RGBA8_OES = 0x8058,
+            DEPTH_COMPONENT16 = 0x81A5;
 
         [DllImport(Lib, EntryPoint = "glClearColor")] public static extern void ClearColor(float r, float g, float b, float a);
         [DllImport(Lib, EntryPoint = "glClear")] public static extern void Clear(uint mask);
@@ -126,5 +142,15 @@ namespace GpuTest
         [DllImport(Lib, EntryPoint = "glReadPixels")]
         public static extern void ReadPixels(int x, int y, int w, int h, uint format, uint type, void* data);
         [DllImport(Lib, EntryPoint = "glFinish")] public static extern void Finish();
+        [DllImport(Lib, EntryPoint = "glFlush")] public static extern void Flush();
+        [DllImport(Lib, EntryPoint = "glGenFramebuffers")] public static extern void GenFramebuffers(int n, out uint fb);
+        [DllImport(Lib, EntryPoint = "glBindFramebuffer")] public static extern void BindFramebuffer(uint target, uint fb);
+        [DllImport(Lib, EntryPoint = "glGenRenderbuffers")] public static extern void GenRenderbuffers(int n, out uint rb);
+        [DllImport(Lib, EntryPoint = "glBindRenderbuffer")] public static extern void BindRenderbuffer(uint target, uint rb);
+        [DllImport(Lib, EntryPoint = "glRenderbufferStorage")]
+        public static extern void RenderbufferStorage(uint target, uint format, int w, int h);
+        [DllImport(Lib, EntryPoint = "glFramebufferRenderbuffer")]
+        public static extern void FramebufferRenderbuffer(uint target, uint attachment, uint rbTarget, uint rb);
+        [DllImport(Lib, EntryPoint = "glCheckFramebufferStatus")] public static extern uint CheckFramebufferStatus(uint target);
     }
 }

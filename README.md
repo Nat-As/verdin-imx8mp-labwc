@@ -10,15 +10,14 @@ the **Mallow** carrier board straight into a minimal **labwc** Wayland desktop. 
 on DRM/KMS, with no X11 or Xwayland, and renders on the GPU (OpenGL ES). The desktop
 shows on the **Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enabled) and on HDMI.
 
-The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (Vulkan, OpenGL ES,
-OpenCL, OpenVX, G2D, TensorFlow Lite with the NPU delegate, hardware video codecs), so it can be
-used as the base for GUI- and machine-learning-heavy applications, including C# applications on
-.NET with OpenCV.
+The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (OpenGL ES, OpenCL,
+OpenVX, G2D, TensorFlow Lite with the NPU delegate, hardware video codecs), so it can be used as
+the base for GUI- and machine-learning-heavy applications, including C# applications on .NET with
+OpenCV.
 
 <p>
   <a href="https://wayland.freedesktop.org"><img src="docs/logos/wayland.png" height="34" alt="Wayland" title="Wayland"></a>
   <a href="https://www.khronos.org/opengles/"><img src="docs/logos/opengles.png" height="34" alt="OpenGL ES" title="OpenGL ES"></a>
-  <a href="https://www.vulkan.org"><img src="docs/logos/vulkan.png" height="34" alt="Vulkan" title="Vulkan"></a>
   <a href="https://www.khronos.org/opencl/"><img src="docs/logos/opencl.png" height="34" alt="OpenCL" title="OpenCL"></a>
   <a href="https://www.khronos.org/openvx/"><img src="docs/logos/openvx.png" height="34" alt="OpenVX" title="OpenVX"></a>
   <a href="https://opencv.org"><img src="docs/logos/opencv.png" height="34" alt="OpenCV" title="OpenCV"></a>
@@ -32,7 +31,7 @@ used as the base for GUI- and machine-learning-heavy applications, including C# 
 |---|---|
 | Boot | Boot animation (Alakai logo, spinner and image version) from the moment the display comes up until the desktop is ready; no kernel or boot messages on the screen |
 | Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (OpenGL ES), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
-| GPU | Vivante GC7000UL: Vulkan, OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `vulkaninfo`, `clinfo`, `glmark2`, `gmem_info` |
+| GPU | Vivante GC7000UL: OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `clinfo`, `glmark2` (**GPU Benchmark** in the launcher), `gmem_info` |
 | NPU | 2.3 TOPS NPU: OpenVX with NN extensions, RapidOpenVX, TIM-VX, TensorFlow Lite 2.16 (C++ and Python `tflite_runtime`) with the VX delegate |
 | Video | Hantro VPU (H.264/H.265/VP9 decode, H.264/H.265 encode) with GStreamer plugins |
 | Shell | fish (default for the terminal, SSH and the console), bash |
@@ -46,12 +45,12 @@ used as the base for GUI- and machine-learning-heavy applications, including C# 
 
 ## Download and install
 
-**Pre-release v0.1.4:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.4/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar)** (631 MB)
+**Pre-release v0.2.0:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar)** (629 MB)
 
-SHA-256: `bba1c6e7a9df98d3296b60d135cf710cf587c6bf185ea1ed838a455c4cd04ae7`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.4/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.4),
+SHA-256: `72a3a742519a56c8713d025010608addfd817ad923a37f32feedf9aa07e5bdee`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.2.0),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -59,7 +58,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.4.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.0.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -187,7 +186,7 @@ desktop. tkinter is installed, but Tk is an X11 toolkit, so tkinter windows need
 
 ### GPU and NPU
 
-Check the hardware acceleration (GPU renderer, Vulkan, OpenCL, OpenVX, NPU, G2D, VPU, display,
+Check the hardware acceleration (GPU renderer, OpenGL ES applications, OpenCL, OpenVX, NPU, G2D, VPU, display,
 touch, audio, RTC, Wi-Fi, Bluetooth, Ethernet), as `alakai_admin`:
 
 ```sh
@@ -199,40 +198,27 @@ a renderer that crashes, hangs or reports errors during startup is skipped until
 
 | Strategy | Renderer |
 |---|---|
-| `gles2` | OpenGL ES 2 on the display device (the way Weston uses the GPU); the default |
-| `gles2-render` | OpenGL ES 2 on the GPU render node |
+| `gles2-render` | OpenGL ES 2 on the GPU render node; the default |
+| `gles2` | OpenGL ES 2 on the display device (desktop works, but OpenGL ES applications cannot show windows) |
 | `pixman` | Software rendering on the CPU (slow; last resort) |
-| `vulkan-auto` | Vulkan, in whichever mode `vk-scanout-test` finds working (below); skipped if none works |
-| `vulkan-buffer` | Vulkan, rendering into a GPU image that is copied into the display memory as plain bytes (through a `VkBuffer`), so it arrives in the linear layout the display reads |
-| `vulkan` | Vulkan, rendering directly into the display buffers (black or scrambled screen on this board) |
-| `vulkan-copy` | Vulkan, rendering into a GPU image that is copied into the display buffer image |
-| `vulkan-noforeign` | Vulkan without the queue ownership transfers of the display buffers |
 
-The Vulkan strategies are **experimental and not used by default** (wlroots 0.17's Vulkan
-renderer is experimental itself). The renderer in use is shown by `labwc-hwaccel-check` and in the
-desktop log (`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). To try Vulkan, set
-`LABWC_RENDERERS="vulkan-auto gles2 pixman"` in `/etc/default/labwc` and run
-`sudo systemctl restart labwc`. Applications can use Vulkan in any case; this only concerns how
-the desktop draws.
+The renderer in use is shown by `labwc-hwaccel-check` and in the desktop log
+(`sudo journalctl -b -t labwc | grep -E "labwc-session|renderer"`). `gles2-render` is the default
+because the Vivante OpenGL ES driver in applications finds the GPU through the device that the
+desktop advertises: with `gles2` that is the display device, and applications' windows stay
+invisible. The desktop does not use Vulkan (the NXP Vulkan driver cannot draw into the display
+buffers on this board); the Vulkan driver of the BSP is still installed for applications.
 
 All GPU strategies wait for the GPU to finish each frame before it is shown. The Vivante driver
 doesn't give the display the fence it would need to wait by itself; without the wait, areas that
 are being redrawn (for example a running `htop`) can flash black. `LABWC_RENDER_FINISH=0` in
 `/etc/default/labwc` turns the wait off.
 
-`sudo vk-scanout-test` (the desktop can keep running) writes into display buffers with different
-Vulkan operations and reads the memory back the way the display controller sees it, and through the
-GPU (OpenGL ES). OpenGL ES, the desktop's working path, is tested as a control, and so is a buffer
-that Vulkan allocates itself. A position-encoding pattern shows not only whether the data arrived
-but also whether it landed in the wrong (tiled) layout. The result says which `vulkan*` strategy
-fits; `-v` prints sample pixels, and `-k` (desktop stopped) shows colour bars on the display for
-each path and asks what you see.
-
-`sudo labwc-gpu-probe` runs `vk-scanout-test`, then starts labwc once per renderer (off-screen,
-the desktop keeps running) and prints which ones start, with a gdb backtrace for any crash.
-`sudo labwc-gpu-probe --kms` also runs the on-display colour-bar test and tests the renderers on the
-real displays: it shows a white test window with each renderer and asks whether you saw it (the
-desktop is stopped for a few minutes).
+`sudo labwc-gpu-probe` starts labwc once per renderer (off-screen, the desktop keeps running)
+with the GPU Test app as a client and prints which ones start, with a gdb backtrace for any crash.
+`sudo labwc-gpu-probe --kms` tests the renderers on the real displays: it shows a white terminal
+and the GPU Test molecule with each renderer and asks whether you saw them (the desktop is stopped
+for a few minutes).
 
 **NPU.** TensorFlow Lite models run on the NPU through the VX delegate
 (`/usr/lib/libvx_delegate.so`):
@@ -273,7 +259,9 @@ dotnet new console -o hello && cd hello && dotnet run
 **GPU Test** (in the application launcher, or `gpu-test`) is a C# demo: a rotating cyclohexane
 molecule rendered with OpenGL ES 2.0 on the GPU, with the measured frame rate in the top right
 corner (normally the display refresh rate). `gpu-test --no-vsync` renders as fast as it can, and
-`gpu-test --headless` measures the GPU without a window.
+`gpu-test --headless` measures the GPU without a window. **GPU Benchmark** in the launcher
+(`gpu-benchmark`) runs glmark2 in a window and keeps its terminal open with the score.
+Both log to the journal: `journalctl -t gpu-test`, `journalctl -t glmark2`.
 
 **OpenCV from C#** uses [OpenCvSharp](https://github.com/shimat/opencvsharp) 4.6.0.20220608, the
 release that matches the image's OpenCV 4.6. Its native part (`libOpenCvSharpExtern.so`) is built
@@ -308,6 +296,9 @@ After a desktop configuration change, select **Restart session** in the desktop 
 System commands below need `sudo`, so run them as `alakai_admin`.
 
 - **Show the desktop log:** `sudo journalctl -b -t labwc`
+- **GPU Test or GPU Benchmark shows no window:** check `journalctl -b -t gpu-test` and
+  `journalctl -b -t glmark2`, and check that the desktop runs the `gles2-render` renderer
+  (`sudo labwc-hwaccel-check` runs both apps and reports `gl-client` and `glmark2`).
 - **Black or garbled screen, or windows drawn wrong:** find a renderer that shows a picture with
   `sudo labwc-gpu-probe --kms`, then set it in `/etc/default/labwc`, for example
   `LABWC_RENDERERS="gles2-render pixman"` (or `WLR_RENDERER=pixman` for software rendering), and run
@@ -355,6 +346,6 @@ NXP proprietary GPU/VPU firmware and libraries under the NXP Software License Ag
 Tezi shows before installing. License texts for every package are installed in
 `/usr/share/common-licenses/` on the board.
 
-The logos above are trademarks of their owners (OpenGL ES, Vulkan, OpenCL and OpenVX: The Khronos
+The logos above are trademarks of their owners (OpenGL ES, OpenCL and OpenVX: The Khronos
 Group; OpenCV: OpenCV team; TensorFlow: Google; .NET: Microsoft; Qt: The Qt Company; Wayland and
 GStreamer: their projects) and only identify the software that the image uses.

@@ -1,23 +1,21 @@
-# i.MX8M Plus / Vivante: build the GLES2 and Vulkan renderers against the
-# Vivante stack from imx-gpu-viv (libEGL/libGLESv2/libgbm, libvulkan_VSI) and
-# fail loudly if they cannot be found instead of silently producing a
-# pixman-only wlroots. The pixman renderer is always built and is used as the
-# runtime fallback (see labwc-session).
+# i.MX8M Plus / Vivante: build the GLES2 renderer against the Vivante stack
+# from imx-gpu-viv (libEGL/libGLESv2/libgbm) and fail loudly if it cannot be
+# found instead of silently producing a pixman-only wlroots. The pixman
+# renderer is always built and is used as the runtime fallback (see
+# labwc-session). The Vulkan renderer is not built: the Vivante Vulkan driver
+# cannot render into the display buffers wlroots allocates (v0.1.x tests).
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += " \
     file://0001-egl-add-WLR_EGL_SKIP_DEVICE-and-log-EGL-setup-steps.patch \
-    file://0002-vulkan-support-drivers-without-VK_EXT_physical_devic.patch \
-    file://0003-gles2-add-WLR_RENDERER_FINISH-to-wait-for-the-GPU-af.patch \
-    file://0004-vulkan-add-render-copy-no-foreign-and-finish-driver-.patch \
-    file://0005-vulkan-add-WLR_VK_RENDER_BUFFER-copy-into-the-DMA-BU.patch \
+    file://0002-gles2-add-WLR_RENDERER_FINISH-to-wait-for-the-GPU-af.patch \
 "
 
-PACKAGECONFIG:append = " opengl gbm vulkan"
-PACKAGECONFIG:remove = "x11 xwayland"
+PACKAGECONFIG:append = " opengl gbm"
+PACKAGECONFIG:remove = "vulkan x11 xwayland"
 
 EXTRA_OEMESON += " \
-    -Drenderers=gles2,vulkan \
+    -Drenderers=gles2 \
     -Dallocators=gbm \
     -Dbackends=drm,libinput \
     -Dsession=enabled \

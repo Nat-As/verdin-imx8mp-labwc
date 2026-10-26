@@ -46,7 +46,7 @@ ls /dev/dri/renderD* >/dev/null 2>&1 && PASS "render-node" "$(ls /dev/dri/render
 
 # --- Compositor renderer --------------------------------------------------------
 state=$(cat /tmp/labwc-session-*/renderer 2>/dev/null | head -n1)
-created=$(journalctl -b -t labwc -o cat 2>/dev/null | grep -oE "Creating (GLES2|Vulkan|pixman) renderer" | tail -n1)
+created=$(journalctl -b -t labwc -o cat 2>/dev/null | grep -oE "Creating (GLES2|pixman) renderer" | tail -n1)
 if ! systemctl is-active -q labwc.service; then
     WARN "renderer" "labwc.service is not running"
 elif [ -z "$state" ]; then
@@ -60,25 +60,57 @@ fi
 failed=$(cat /tmp/labwc-session-*/failed 2>/dev/null | tr '\n' ' ')
 [ -n "$failed" ] && ! echo "$state" | grep -q pixman && INFO "renderer" "strategies that failed this boot: $failed"
 
-# --- Vulkan -------------------------------------------------------------------
-if have vulkaninfo; then
-    vk=$(timeout 20 vulkaninfo --summary 2>/dev/null)
-    dev=$(echo "$vk" | grep -m1 "deviceName" | cut -d= -f2- | sed 's/^ *//')
-    api=$(echo "$vk" | grep -m1 "apiVersion" | cut -d= -f2- | sed 's/^ *//')
-    if [ -n "$dev" ]; then PASS "vulkan" "$dev, API $api"
-    else FAIL "vulkan" "no Vulkan device (vulkaninfo --summary)"; fi
-else
-    WARN "vulkan" "vulkaninfo not installed"
+# --- OpenGL ES applications on the desktop ----------------------------------------
+# Runs GPU Test (an OpenGL ES client) for about 2 seconds in the running desktop,
+# as the desktop user, and glmark2 briefly; both open a window.
+desk_user=$(systemctl show -p User --value labwc.service 2>/dev/null)
+run_in_desktop() {
+    local uid rt sock
+    uid=$(id -u "$desk_user" 2>/dev/null) || return 127
+    rt=/run/user/$uid
+    sock=$(ls "$rt"/wayland-[0-9] 2>/dev/null | head -n1)
+    [ -n "$sock" ] || return 126
+    local envs=(XDG_RUNTIME_DIR="$rt" WAYLAND_DISPLAY="${sock##*/}" SDL_VIDEODRIVER=wayland
+        LANG=en_US.UTF-8 HOME="$(getent passwd "$desk_user" | cut -d: -f6)")
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$desk_user" -- env "${envs[@]}" "$@"
+    elif [ "$(id -un)" = "$desk_user" ]; then
+        env "${envs[@]}" "$@"
+    else
+        return 125
+    fi
+}
+if [ -n "$desk_user" ] && systemctl is-active -q labwc.service; then
+    if have gpu-test; then
+        out=$(timeout 60 bash -c "$(declare -f run_in_desktop); desk_user=$desk_user; run_in_desktop gpu-test --frames 120" 2>&1)
+        rc=$?
+        gl=$(echo "$out" | grep -m1 "gpu-test: OpenGL" | sed 's/^gpu-test: //')
+        if [ $rc -eq 0 ] && [ -n "$gl" ]; then
+            PASS "gl-client" "OpenGL ES application window on the desktop: $gl"
+        elif [ $rc -eq 125 ]; then
+            WARN "gl-client" "run as root (sudo) or as $desk_user to test an OpenGL ES window"
+        else
+            FAIL "gl-client" "OpenGL ES application (gpu-test) failed (exit $rc): $(echo "$out" | grep -v '^$' | tail -n 2 | tr '\n' ' ')"
+        fi
+    fi
+    if have glmark2-es2-wayland && [ "$QUICK" = 0 ]; then
+        out=$(timeout 120 bash -c "$(declare -f run_in_desktop); desk_user=$desk_user; run_in_desktop glmark2-es2-wayland --size 480x320 -b build:duration=2.0 -b shading:shading=phong:duration=2.0" 2>&1)
+        score=$(echo "$out" | grep -m1 -oE "glmark2 Score: [0-9]+")
+        if [ -n "$score" ]; then
+            PASS "glmark2" "$score (2 scenes, 480x320 window)"
+        else
+            FAIL "glmark2" "glmark2-es2-wayland failed: $(echo "$out" | grep -v '^$' | tail -n 2 | tr '\n' ' ')"
+        fi
+    fi
 fi
-
-if have vk-scanout-test; then
-    vkmode=$(timeout 60 vk-scanout-test -q 2>/dev/null)
-    case $vkmode in
-    direct) PASS "vk-scanout" "Vulkan rendering reaches display buffers (desktop strategy: vulkan)" ;;
-    copy)   PASS "vk-scanout" "Vulkan reaches display buffers in render-copy mode (desktop strategy: vulkan-copy)" ;;
-    buffer) PASS "vk-scanout" "Vulkan reaches display buffers through a VkBuffer (desktop strategy: vulkan-buffer)" ;;
-    *)      WARN "vk-scanout" "Vulkan rendering does not reach display buffers (${vkmode:-test failed}); details: vk-scanout-test" ;;
-    esac
+if have gpu-test && [ "$QUICK" = 0 ]; then
+    out=$(timeout 120 gpu-test --headless --frames 600 2>&1)
+    fps=$(echo "$out" | grep -m1 -oE "average [0-9.]+ FPS")
+    if [ -n "$fps" ]; then
+        INFO "gpu-bench" "GPU Test off-screen, 900x560, no vsync: $fps"
+    else
+        WARN "gpu-bench" "gpu-test --headless failed: $(echo "$out" | tail -n 1)"
+    fi
 fi
 
 # --- OpenCL -------------------------------------------------------------------

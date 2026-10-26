@@ -1,4 +1,4 @@
-From 14296c41ad722caf5916322fa1dd0704578adc8b Mon Sep 17 00:00:00 2001
+From 694df2bae51e43ba11d575f1b2b1146720e12473 Mon Sep 17 00:00:00 2001
 From: Nat-As <42288915+Nat-As@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 18:16:32 -0400
 Subject: [PATCH 1/2] egl: add WLR_EGL_SKIP_DEVICE and log EGL setup steps

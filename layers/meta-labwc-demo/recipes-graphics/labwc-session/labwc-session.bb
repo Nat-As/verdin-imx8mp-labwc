@@ -1,7 +1,7 @@
 SUMMARY = "labwc desktop session for the labwc demo image"
 DESCRIPTION = "systemd unit that autostarts labwc as the unprivileged desktop user \
 on tty7 (seat via seatd, user session via PAM/pam_systemd), a session \
-wrapper that picks a working GPU renderer (Vulkan, GLES2, pixman fallback), and default labwc, waybar, foot and \
+wrapper that picks a working GPU renderer (OpenGL ES, pixman fallback), and default labwc, waybar, foot and \
 fuzzel configuration plus a wallpaper."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
@@ -10,6 +10,7 @@ SRC_URI = " \
     file://labwc-session \
     file://labwc-demo-outputs \
     file://labwc-splash \
+    file://gpu-benchmark \
     file://labwc.service \
     file://labwc-autologin \
     file://labwc.default \
@@ -66,6 +67,7 @@ do_install() {
     install -Dm0644 ${WORKDIR}/waybar-style.css ${D}${sysconfdir}/xdg/waybar/style.css
 
     install -Dm0644 ${WORKDIR}/glmark2.desktop ${D}${datadir}/applications/glmark2-es2-wayland.desktop
+    install -Dm0755 ${WORKDIR}/gpu-benchmark ${D}${bindir}/gpu-benchmark
 
     install -Dm0644 ${WORKDIR}/alakai-wallpaper.png ${D}${datadir}/backgrounds/labwc-demo/wallpaper.png
     install -Dm0644 ${WORKDIR}/labwc-demo.fish ${D}${sysconfdir}/fish/conf.d/labwc-demo.fish

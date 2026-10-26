@@ -30,10 +30,12 @@ jobs:
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-wayland.sh \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-demo-outputs \
-            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-splash
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-splash \
+            layers/meta-labwc-demo/recipes-dotnet/gpu-test/files/gpu-test.sh
           shellcheck --severity=warning -s bash \
             layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-gpu-probe \
-            layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-hwaccel-check
+            layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-hwaccel-check \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/gpu-benchmark
 
       - name: XML (labwc config, repo manifest)
         run: |
@@ -105,8 +107,8 @@ jobs:
             if grep -qx "$pn" pn-buildlist; then echo "$pn must not be in the image"; exit 1; fi
           done
           # GPU renderers and OpenCL in the build configuration
-          bitbake -e wlroots-0.17 | grep -E '^EXTRA_OEMESON=.*-Drenderers=gles2,vulkan' > /dev/null \
-            || { echo "wlroots is not built with the gles2 and vulkan renderers"; exit 1; }
+          bitbake -e wlroots-0.17 | grep -E '^EXTRA_OEMESON=.*-Drenderers=gles2 ' > /dev/null \
+            || { echo "wlroots is not built with (only) the gles2 renderer"; exit 1; }
           bitbake -e opencv | grep -E '^PACKAGECONFIG=.*\bopencl\b' > /dev/null \
             || { echo "opencv is not built with OpenCL"; exit 1; }
           echo "$(wc -l < pn-buildlist) recipes in the labwc-demo-image build"

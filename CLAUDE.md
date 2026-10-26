@@ -70,30 +70,24 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 - NetworkManager (connman removed, systemd-networkd/dnsmasq masked), BlueZ + Blueman.
 - Python 3.12 + numpy/scipy/pandas/matplotlib/OpenCV/PyQt6, Qt 6.11, dev tools, all kernel
   modules, Realtek out-of-tree `r8152` (preferred via depmod override).
-- GPU rendering (v0.1.0+): wlroots is built with the gles2 + vulkan renderers and two patches
-  (`recipes-wlroots/wlroots/files/`): `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead of the
-  EGL device lookup that crashed labwc with SIGSEGV on Vivante in v0.0.3) and Vulkan support for
-  drivers without `VK_EXT_physical_device_drm` (Vivante VSI). `labwc-session` tries the
-  strategies in `LABWC_RENDERERS` (default `gles2 gles2-render pixman`) and falls back on a
-  crash, renderer errors in the first 20 s or no client response in 45 s; state in
-  `/tmp/labwc-session-<uid>/`. **Vulkan is opt-in only**: on hardware it starts cleanly (modeset
-  OK, outputs enabled, no errors) but the screen stays black, which the session can't detect
-  (v0.1.0 rev 1). Stock wlroots EGL (`gles2-device`) segfaults in Vivante's
-  `eglQueryDevicesEXT()` (gdb-confirmed).
-- v0.1.1 wlroots patches 0003/0004: `WLR_RENDERER_FINISH` (glFinish / vkQueueWaitIdle per frame;
-  set by labwc-session, fixes black flashes in redrawn areas: Vivante gives no implicit-sync
-  fence), `WLR_VK_RENDER_COPY` (render into an optimal image, vkCmdCopyImage of the updated region
-  into the DMA-BUF), `WLR_VK_NO_FOREIGN`. Strategies `vulkan-copy`, `vulkan-noforeign`,
-  `vulkan-auto` (uses `vk-scanout-test -q`: direct/copy/none). `vk-scanout-test` (C, in
-  labwc-demo-gpu-tools) imports a linear GBM scanout BO into Vulkan and checks which write
-  methods reach memory; all OK on Intel/Mesa (validated on the build host).
-- v0.1.1 hardware result: vk-scanout-test said "NOT WRITTEN" for every method (readback through
-  the GBM BO's DMA-BUF mmap, probably stale/cached), but the user saw scrambled pixels on screen
-  with all vulkan strategies: VSI writes images in imported memory in its own tiled layout. v0.1.2:
-  vk-scanout-test reads back through a DRM dumb buffer (uncached, ground truth), uses a position
-  pattern (detects 4x4 tiling), adds LINEAR-tiling and VkBuffer methods; wlroots patch 0005
-  `WLR_VK_RENDER_BUFFER` (render to optimal image, vkCmdCopyImageToBuffer into the DMA-BUF bound
-  as VkBuffer); strategy `vulkan-buffer`, `vulkan-auto` maps direct/copy/buffer.
+- GPU rendering (v0.2.0): wlroots is built with **only** the gles2 renderer (+ pixman) and two
+  patches (`recipes-wlroots/wlroots/files/`): 0001 `WLR_EGL_SKIP_DEVICE` (EGL GBM platform instead
+  of the EGL device lookup: stock wlroots segfaults in Vivante's `eglQueryDevicesEXT()`,
+  gdb-confirmed) and 0002 `WLR_RENDERER_FINISH` (glFinish per frame, set by labwc-session; fixes
+  black flashes in redrawn areas: Vivante gives no implicit-sync fence). `labwc-session` tries the
+  strategies in `LABWC_RENDERERS` (default `gles2-render gles2 pixman`) and falls back on a crash,
+  renderer errors in the first 20 s or no client response in 45 s; state in
+  `/tmp/labwc-session-<uid>/`. It also forces a UTF-8 `LANG` (systemd gives `C`).
+- Vulkan was removed in v0.2.0 (v0.1.0-v0.1.4 history): the Vivante VSI Vulkan driver writes
+  images in imported (GBM/DMA-BUF) memory in its own tiled layout, so every wlroots Vulkan mode
+  showed a black or scrambled screen; only Vulkan-allocated exported buffers worked. Don't
+  reintroduce it unless asked. The BSP's Vulkan driver/vulkan-tools still come in via Toradex's
+  `packagegroup-vulkan-tools-tdx-graphical`.
+- OpenGL ES clients (v0.1.4 hardware: GPU Test and glmark2 showed no window): Vivante client EGL
+  finds the GPU through wl_drm, and wlroots' wl_drm advertises the renderer's DRM node. With
+  `gles2` that is `card1` (imx-drm, display only), with `gles2-render` it is `renderD128`, hence
+  the v0.2.0 default. GL apps log to the journal (`-t gpu-test`, `-t glmark2`; `gpu-benchmark`
+  wrapper keeps the terminal open and reports signals).
 - Boot splash (v0.1.3): Plymouth (meta-oe, bbappend: `drm` on, `initrd` off) with the two-step theme
   `argos` (`recipes-graphics/argos-boot-splash`; images from `scripts/make-boot-splash.py`: logo cut
   from the wallpaper + 30 red starburst spinner frames). Kernel fragment `display-builtin.cfg`
@@ -110,12 +104,10 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   dotnet-native (portable IL, `UseAppHost=false`, offline) into `${libdir}/<app>` + launcher.
   `opencvsharp` 4.6.0.20220608 (matches NXP OpenCV 4.6): native OpenCvSharpExtern built from git,
   managed dll + offline feed from nuget.org nupkgs (`/usr/share/nuget/opencvsharp-feed`).
-  Apps: `gpu-test` (C#, SDL2 + GLES2 P/Invoke, `--headless` EGL pbuffer mode for testing; tested
-  on the host with Mesa `EGL_PLATFORM=surfaceless`) and `opencv-cs-check` (OpenCL via mangled
+  Apps: `gpu-test` (C#, SDL2 + GLES2 P/Invoke; `--headless` renders into an FBO on a surfaceless
+  context of the EGL GBM platform on `/dev/dri/renderD*`, since Vivante has no default EGL display
+  outside Wayland; tested on the host with Mesa) and `opencv-cs-check` (OpenCL via mangled
   `cv::ocl` symbols).
-- vk-scanout-test v0.1.4: GLES (EGLImage) readback + GLES write control for GBM BOs,
-  Vulkan-allocated exported LINEAR buffer (mode "export"), `-k` on-display colour-bar test (needs
-  DRM master: run from `labwc-gpu-probe --kms`).
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm

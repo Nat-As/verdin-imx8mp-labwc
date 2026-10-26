@@ -1,0 +1,19 @@
+#!/bin/bash
+# GPU Benchmark (desktop menu): runs glmark2 (OpenGL ES 2.0, Wayland window)
+# in a terminal and keeps the result on screen. The output is also in the
+# journal: journalctl -t glmark2
+echo "glmark2: OpenGL ES 2.0 benchmark (a few minutes; Ctrl+C stops it)"
+echo
+glmark2-es2-wayland "$@" 2>&1 | tee >(systemd-cat -t glmark2 2>/dev/null)
+rc=${PIPESTATUS[0]}
+echo
+if [ "$rc" -gt 128 ]; then
+    echo "glmark2 was terminated by signal $((rc - 128)) ($(kill -l $((rc - 128)) 2>/dev/null))"
+elif [ "$rc" -ne 0 ]; then
+    echo "glmark2 failed (exit code $rc)"
+fi
+if [ -t 0 ]; then
+    echo "Press Enter to close"
+    read -r _
+fi
+exit "$rc"

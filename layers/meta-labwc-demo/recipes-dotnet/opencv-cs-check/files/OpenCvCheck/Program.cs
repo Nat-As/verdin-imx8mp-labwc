@@ -1,6 +1,7 @@
 // opencv-cs-check: OpenCV from C# with hardware acceleration.
 // Prints the OpenCV build, whether OpenCL (the GPU) is available, and times a
-// Gaussian blur on a 1920x1080 image on the CPU (Mat) and with OpenCL (UMat).
+// small vision pipeline (grayscale, Gaussian blur, Canny) on a 1920x1080 frame
+// on the CPU (Mat) and with OpenCL (UMat).
 //
 //   opencv-cs-check [-q]     -q: print only "opencl" or "cpu"
 using System;
@@ -62,32 +63,50 @@ internal static class Program
         Console.WriteLine($"Build: {opencl}");
         Console.WriteLine($"OpenCL available: {have}, in use: {use}");
 
+        // A typical vision pipeline on a 1080p colour frame: grayscale, 7x7
+        // Gaussian blur, Canny edges. Mat runs on the CPU, UMat with OpenCL on
+        // the GPU. Two warm-up runs first (OpenCL compiles its kernels then).
         using var src = new Mat(1080, 1920, MatType.CV_8UC3);
         Cv2.Randu(src, new Scalar(0, 0, 0), new Scalar(255, 255, 255));
-        var ksize = new Size(15, 15);
-        const int runs = 20;
+        const int runs = 10;
 
-        using var dst = new Mat();
-        Cv2.GaussianBlur(src, dst, ksize, 0);
-        var sw = Stopwatch.StartNew();
-        for (int i = 0; i < runs; i++)
-            Cv2.GaussianBlur(src, dst, ksize, 0);
-        double cpuMs = sw.Elapsed.TotalMilliseconds / runs;
-        Console.WriteLine($"GaussianBlur 15x15, 1920x1080, CPU (Mat):     {cpuMs,7:0.0} ms");
+        double cpuMs = Time(runs, () =>
+        {
+            using var gray = new Mat();
+            using var blur = new Mat();
+            using var edges = new Mat();
+            Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+            Cv2.GaussianBlur(gray, blur, new Size(7, 7), 0);
+            Cv2.Canny(blur, edges, 50, 150);
+        });
+        Console.WriteLine($"Gray + blur 7x7 + Canny, 1920x1080, CPU (Mat):     {cpuMs,7:0.0} ms");
 
         if (have && use)
         {
             using var usrc = src.GetUMat(AccessFlag.READ, UMatUsageFlags.None);
-            using var udst = new UMat();
-            Cv2.GaussianBlur(usrc, udst, ksize, 0);   // first call compiles the OpenCL kernel
-            using (var warm = udst.GetMat(AccessFlag.READ)) { }
-            sw.Restart();
-            for (int i = 0; i < runs; i++)
-                Cv2.GaussianBlur(usrc, udst, ksize, 0);
-            using (var result = udst.GetMat(AccessFlag.READ)) { }   // wait for the GPU
-            double gpuMs = sw.Elapsed.TotalMilliseconds / runs;
-            Console.WriteLine($"GaussianBlur 15x15, 1920x1080, OpenCL (UMat): {gpuMs,7:0.0} ms");
+            double gpuMs = Time(runs, () =>
+            {
+                using var gray = new UMat();
+                using var blur = new UMat();
+                using var edges = new UMat();
+                Cv2.CvtColor(usrc, gray, ColorConversionCodes.BGR2GRAY);
+                Cv2.GaussianBlur(gray, blur, new Size(7, 7), 0);
+                Cv2.Canny(blur, edges, 50, 150);
+                using var result = edges.GetMat(AccessFlag.READ);   // wait for the GPU
+            });
+            Console.WriteLine($"Gray + blur 7x7 + Canny, 1920x1080, OpenCL (UMat): {gpuMs,7:0.0} ms");
         }
         return 0;
+    }
+
+    // Average milliseconds per run, after two warm-up runs
+    private static double Time(int runs, Action work)
+    {
+        work();
+        work();
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < runs; i++)
+            work();
+        return sw.Elapsed.TotalMilliseconds / runs;
     }
 }

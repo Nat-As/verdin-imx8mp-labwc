@@ -1,18 +1,19 @@
 #!/bin/bash
-# labwc-gpu-probe: start labwc once per GPU renderer strategy, with a test
-# window, and report which strategies work. A crash is run under gdb and its
-# backtrace is printed.
+# labwc-gpu-probe: start labwc once per GPU renderer strategy, with two test
+# windows (a white terminal, and GPU Test, an OpenGL ES application), and
+# report which strategies work. A crash is run under gdb and its backtrace is
+# printed.
 #
 #   sudo labwc-gpu-probe                 headless test of all strategies (the
 #                                        desktop keeps running)
 #   sudo labwc-gpu-probe --kms           test on the real displays: stops the
-#                                        desktop, shows a white test window
-#                                        with each strategy, asks whether it
-#                                        was visible, then restarts the desktop
-#   sudo labwc-gpu-probe vulkan gles2    test only these strategies
+#                                        desktop, shows the test windows with
+#                                        each strategy, asks whether they were
+#                                        visible, then restarts the desktop
+#   sudo labwc-gpu-probe gles2 pixman    test only these strategies
 #
 # Strategies are the ones of labwc-session (/etc/default/labwc):
-#   vulkan gles2 gles2-render gles2-device pixman
+#   gles2-render gles2 gles2-device pixman
 # Logs: /tmp/labwc-gpu-probe-<time>/
 set -u
 
@@ -31,7 +32,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2 gles2-render vulkan-buffer vulkan vulkan-copy vulkan-noforeign gles2-device pixman)
+[ ${#STRATEGIES[@]} -gt 0 ] || STRATEGIES=(gles2-render gles2 gles2-device pixman)
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "labwc-gpu-probe: run as root (sudo labwc-gpu-probe)" >&2
@@ -82,10 +83,6 @@ fi
 strategy_env() {
     local finish=" WLR_RENDERER_FINISH=1"
     case $1 in
-    vulkan)       echo "WLR_RENDERER=vulkan$finish" ;;
-    vulkan-copy)  echo "WLR_RENDERER=vulkan WLR_VK_RENDER_COPY=1$finish" ;;
-    vulkan-noforeign) echo "WLR_RENDERER=vulkan WLR_VK_NO_FOREIGN=1$finish" ;;
-    vulkan-buffer) echo "WLR_RENDERER=vulkan WLR_VK_RENDER_BUFFER=1$finish" ;;
     gles2)        echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1$finish" ;;
     gles2-render) echo "WLR_RENDERER=gles2 WLR_EGL_SKIP_DEVICE=1${render_node:+ WLR_RENDER_DRM_DEVICE=$render_node}$finish" ;;
     gles2-device) echo "WLR_RENDERER=gles2$finish" ;;
@@ -101,18 +98,6 @@ echo
 have_gdb=0
 command -v gdb >/dev/null 2>&1 && have_gdb=1
 
-# Which Vulkan operations reach a display buffer's memory. With --kms also
-# on the display: colour bars per write path, answered interactively.
-if command -v vk-scanout-test >/dev/null 2>&1; then
-    echo "== vk-scanout-test (Vulkan writes into a display buffer)"
-    if [ "$KMS" = 1 ] && [ -t 0 ]; then
-        vk-scanout-test -v -k ${kms_card:+-d $kms_card}
-    else
-        timeout 120 vk-scanout-test -v ${kms_card:+-d $kms_card} 2>&1 | tee "$outdir/vk-scanout-test.log" | sed 's/^/   /'
-    fi
-    echo
-fi
-
 declare -A result
 for s in "${STRATEGIES[@]}"; do
     if ! envs=$(strategy_env "$s"); then
@@ -125,16 +110,20 @@ for s in "${STRATEGIES[@]}"; do
     else
         # Headless: the renderer runs on the GPU render node
         backend_env="WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1"
-        case $s in gles2|gles2-device|vulkan)
+        case $s in gles2|gles2-device)
             [ -n "$render_node" ] && backend_env="$backend_env WLR_RENDER_DRM_DEVICE=$render_node" ;;
         esac
     fi
     log=$outdir/$s.log
     echo "== $s ($envs)"
-    # Test client: a white foot window for a few seconds (easy to tell from a
-    # black screen), then exit labwc
-    startup="sh -c 'foot -o colors.background=ffffff -o colors.foreground=000000 -e sh -c \"echo labwc-gpu-probe: renderer $s; sleep $((SECONDS_PER_TEST - 2))\" & sleep $SECONDS_PER_TEST; labwc --exit'"
-    [ "$KMS" = 1 ] && echo "   watch the display: a white terminal window should appear for ${SECONDS_PER_TEST}s"
+    # Test clients: a white foot window (shared memory buffers, easy to tell
+    # from a black screen) and GPU Test (OpenGL ES, buffers from the GPU via
+    # wl_drm) for a few seconds, then exit labwc
+    gl_client=
+    command -v gpu-test >/dev/null 2>&1 && \
+        gl_client="gpu-test --frames $((SECONDS_PER_TEST * 60)) > $outdir/$s-gpu-test.log 2>&1 &"
+    startup="sh -c 'foot -o colors.background=ffffff -o colors.foreground=000000 -e sh -c \"echo labwc-gpu-probe: renderer $s; sleep $((SECONDS_PER_TEST - 2))\" & $gl_client sleep $SECONDS_PER_TEST; labwc --exit'"
+    [ "$KMS" = 1 ] && echo "   watch the display: a white terminal window and the GPU Test molecule should appear for ${SECONDS_PER_TEST}s"
     cmd=(labwc -C "$cfg" -V -s "$startup")
     if [ "$have_gdb" = 1 ]; then
         cmd=(gdb -q -batch
@@ -152,7 +141,7 @@ for s in "${STRATEGIES[@]}"; do
         timeout -s KILL $((SECONDS_PER_TEST + 40)) "${cmd[@]}" > "$log" 2>&1
     rc=$?
 
-    renderer_line=$(grep -m1 -E "Creating (GLES2|Vulkan|pixman) renderer|Using (EGL|Vulkan)|Vulkan device" "$log")
+    renderer_line=$(grep -m1 -E "Creating (GLES2|pixman) renderer|Using EGL" "$log")
     if grep -qE "Program received signal SIG(SEGV|ABRT|BUS|ILL|FPE|TRAP)" "$log"; then
         sig=$(grep -m1 -oE "Program received signal SIG[A-Z]+" "$log" | awk '{print $4}')
         result[$s]="CRASH ($sig)"
@@ -165,11 +154,11 @@ for s in "${STRATEGIES[@]}"; do
         echo "   -> HANG: labwc did not exit, killed"
     elif { [ "$have_gdb" = 1 ] && grep -q "exited normally" "$log"; } ||
          { [ "$have_gdb" = 0 ] && [ $rc -eq 0 ]; }; then
-        errs=$(grep -cE "VK_ERROR|Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log")
+        errs=$(grep -cE "Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log")
         if [ "$errs" -gt 0 ]; then
             result[$s]="RAN, $errs renderer errors"
             echo "   -> ran, but logged $errs renderer errors:"
-            grep -m5 -E "VK_ERROR|Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log" | sed 's/^/      /'
+            grep -m5 -E "Failed to render|Failed to import|Failed to allocate|EGL_BAD_|GL_INVALID_|gbm_bo_create failed" "$log" | sed 's/^/      /'
         else
             result[$s]="OK"
             echo "   -> OK${renderer_line:+: ${renderer_line#*] }}"
@@ -180,13 +169,24 @@ for s in "${STRATEGIES[@]}"; do
         echo "   -> FAILED (${code:-exit $rc}). Errors:"
         grep -E "\[ERROR\]|error|Failed|failed" "$log" | grep -v "^$" | tail -n 10 | sed 's/^/      /'
     fi
+    # GPU Test's own report (did the OpenGL ES client start and render?)
+    if [ -s "$outdir/$s-gpu-test.log" ]; then
+        echo "   GPU Test: $(grep -m1 -E 'gpu-test: (OpenGL|could not|SDL|EGL|no access)' "$outdir/$s-gpu-test.log" || tail -n 1 "$outdir/$s-gpu-test.log")"
+    fi
     # Only a person can tell whether the picture reached the display
     if [ "$KMS" = 1 ] && [ -t 0 ] && [[ ${result[$s]} == OK* || ${result[$s]} == RAN* ]]; then
-        read -r -p "   Was the white window visible on the display? [y/n] " seen
+        read -r -p "   Was the white terminal visible? [y/n] " seen
         case $seen in
-        y*|Y*) result[$s]="${result[$s]}, window visible" ;;
-        *)     result[$s]="${result[$s]}, NOT visible (black screen)" ;;
+        y*|Y*) result[$s]="${result[$s]}, terminal visible" ;;
+        *)     result[$s]="${result[$s]}, terminal NOT visible" ;;
         esac
+        if [ -n "$gl_client" ]; then
+            read -r -p "   Was the rotating GPU Test molecule visible? [y/n] " seen
+            case $seen in
+            y*|Y*) result[$s]="${result[$s]}, GPU Test visible" ;;
+            *)     result[$s]="${result[$s]}, GPU Test NOT visible" ;;
+            esac
+        fi
     fi
     echo
     sleep 1

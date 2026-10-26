@@ -240,8 +240,10 @@ void main() { gl_FragColor = vec4(uColor, 1.0); }";
                 frames++;
                 if (snapshot != null && frames == maxFrames)
                     SaveSnapshot(snapshot, w, h);
-                if (headless)
+                if (headless && eglSurface != IntPtr.Zero)
                     Egl.SwapBuffers(eglDisplay, eglSurface);
+                else if (headless)
+                    Gl.Flush();
                 else
                     Sdl.GL_SwapWindow(window);
                 if (maxFrames > 0 && frames >= maxFrames)
@@ -308,10 +310,17 @@ void main() { gl_FragColor = vec4(uColor, 1.0); }";
             return true;
         }
 
-        // --headless: EGL pbuffer on the default display, no window system
+        // --headless: no window. EGL on the GBM platform of the GPU render node
+        // (as the compositor uses it) with a surfaceless context rendering into
+        // a framebuffer object; if that is not available (other drivers), a
+        // pbuffer on the default EGL display.
         private static bool CreateHeadless(int w, int h, out IntPtr display, out IntPtr surface)
         {
             surface = IntPtr.Zero;
+            display = IntPtr.Zero;
+            if (CreateGbmContext(w, h, out display))
+                return true;
+
             display = Egl.GetDisplay(IntPtr.Zero);
             if (display == IntPtr.Zero || Egl.Initialize(display, out _, out _) == 0)
             {
@@ -333,6 +342,56 @@ void main() { gl_FragColor = vec4(uColor, 1.0); }";
                 Console.Error.WriteLine("gpu-test: EGL pbuffer setup failed: 0x" + Egl.GetError().ToString("x"));
                 return false;
             }
+            return true;
+        }
+
+        private static bool CreateGbmContext(int w, int h, out IntPtr display)
+        {
+            display = IntPtr.Zero;
+            string node = null;
+            try
+            {
+                foreach (string n in Directory.GetFiles("/dev/dri", "renderD*"))
+                {
+                    node = n;
+                    break;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            if (node == null)
+                return false;
+            int fd = Gbm.Open(node, Gbm.O_RDWR | Gbm.O_CLOEXEC);
+            IntPtr gbm = fd >= 0 ? Gbm.CreateDevice(fd) : IntPtr.Zero;
+            if (gbm == IntPtr.Zero)
+                return false;
+            display = Egl.GetPlatformDisplay(Egl.PLATFORM_GBM_KHR, gbm, IntPtr.Zero);
+            if (display == IntPtr.Zero || Egl.Initialize(display, out _, out _) == 0)
+                return false;
+            Egl.BindAPI(Egl.OPENGL_ES_API);
+            int[] cfgAttribs = { Egl.RENDERABLE_TYPE, Egl.OPENGL_ES2_BIT, Egl.NONE };
+            if (Egl.ChooseConfig(display, cfgAttribs, out IntPtr config, 1, out int count) == 0 || count == 0)
+                return false;
+            IntPtr ctx = Egl.CreateContext(display, config, IntPtr.Zero, new[] { Egl.CONTEXT_CLIENT_VERSION, 2, Egl.NONE });
+            if (ctx == IntPtr.Zero || Egl.MakeCurrent(display, IntPtr.Zero, IntPtr.Zero, ctx) == 0)
+                return false;
+
+            Gl.GenFramebuffers(1, out uint fbo);
+            Gl.BindFramebuffer(Gl.FRAMEBUFFER, fbo);
+            Gl.GenRenderbuffers(1, out uint color);
+            Gl.BindRenderbuffer(Gl.RENDERBUFFER, color);
+            Gl.RenderbufferStorage(Gl.RENDERBUFFER, Gl.RGBA8_OES, w, h);
+            Gl.FramebufferRenderbuffer(Gl.FRAMEBUFFER, Gl.COLOR_ATTACHMENT0, Gl.RENDERBUFFER, color);
+            Gl.GenRenderbuffers(1, out uint depth);
+            Gl.BindRenderbuffer(Gl.RENDERBUFFER, depth);
+            Gl.RenderbufferStorage(Gl.RENDERBUFFER, Gl.DEPTH_COMPONENT16, w, h);
+            Gl.FramebufferRenderbuffer(Gl.FRAMEBUFFER, Gl.DEPTH_ATTACHMENT, Gl.RENDERBUFFER, depth);
+            if (Gl.CheckFramebufferStatus(Gl.FRAMEBUFFER) != Gl.FRAMEBUFFER_COMPLETE)
+            {
+                Console.Error.WriteLine("gpu-test: off-screen framebuffer incomplete");
+                return false;
+            }
+            Console.WriteLine($"gpu-test: off-screen rendering on {node} (EGL GBM platform)");
             return true;
         }
 
