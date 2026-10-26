@@ -9,7 +9,8 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
    - `c`: minor tweaks/fixes (e.g. package additions, config changes)
    - `b`: larger changes
    - `a`: major changes / large compatibility differences
-   - We are in **pre-release**: versions are `v0.x.y`. The first full release will be **v1.0.0**.
+   - **v1.0.0** (2026-10-26) is the first official release; v0.x.y were pre-releases. Releases are
+     published as official GitHub releases (marked latest), not pre-releases.
    - Create an annotated git tag with exactly that name (`git tag -a v0.0.3 -m "..."`) for each release.
 2. **README.md** must be updated for each release: correct information, and the download link,
    size and SHA-256 of the new release asset.
@@ -35,7 +36,7 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
    (`_tezi._tcp`), so Tezi lists it by itself (verified with Tezi on hardware). Ctrl+C stops it.
 5. **After the user confirms the hardware test**: `git push origin main`, wait for CI (`gh run watch`)
    to be green, `git tag -a vX.Y.Z` + `git push origin vX.Y.Z`,
-   `gh release create vX.Y.Z --prerelease --notes-file release/vX.Y.Z/release-notes.md <assets>`,
+   `gh release create vX.Y.Z --latest --notes-file release/vX.Y.Z/release-notes.md <assets>`,
    then verify the README download link (download + `sha256sum`) and the shields.io badges.
 
 ## Git

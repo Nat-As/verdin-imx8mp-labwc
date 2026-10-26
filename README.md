@@ -1,7 +1,7 @@
 # labwc desktop for Toradex Verdin iMX8M Plus on Mallow
 
 [![build](https://img.shields.io/github/actions/workflow/status/Nat-As/verdin-imx8mp-labwc/build.yml?branch=main&label=build)](https://github.com/Nat-As/verdin-imx8mp-labwc/actions/workflows/build.yml)
-[![release](https://img.shields.io/github/v/release/Nat-As/verdin-imx8mp-labwc?include_prereleases&label=release)](https://github.com/Nat-As/verdin-imx8mp-labwc/releases)
+[![release](https://img.shields.io/github/v/release/Nat-As/verdin-imx8mp-labwc?label=release)](https://github.com/Nat-As/verdin-imx8mp-labwc/releases)
 [![downloads](https://img.shields.io/github/downloads/Nat-As/verdin-imx8mp-labwc/total?label=downloads&cacheSeconds=3600)](https://github.com/Nat-As/verdin-imx8mp-labwc/releases)
 [![license](https://img.shields.io/github/license/Nat-As/verdin-imx8mp-labwc?label=license)](LICENSE)
 
@@ -45,12 +45,12 @@ OpenCV.
 
 ## Download and install
 
-**Pre-release v0.2.1:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar)** (634 MB)
+**Release v1.0.0:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar)** (634 MB)
 
-SHA-256: `bf029a5e1b4011b1b5a67142c2a26530c49bfcef91469945378304af48245346`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.2.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.2.1),
+SHA-256: `f501d47d6c16ea6c11b7bb0bec7cdcda66cf50d8edb101920b696c2ad87c9f9c`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v1.0.0),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -58,7 +58,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -77,9 +77,9 @@ In recovery mode, Tezi also runs a network over the USB OTG cable (USB NCM/RNDIS
 image to Tezi over that link and announces it with Zeroconf, so Tezi lists it by itself:
 
 ```sh
-./serve-tezi.sh v0.2.1                      # release/v0.2.1/...Tezi_v0.2.1.tar
+./serve-tezi.sh v1.0.0                      # release/v1.0.0/...Tezi_v1.0.0.tar
 ./serve-tezi.sh build                       # the current build
-./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.2.1.tar
+./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar
 ```
 
 Then install it in Tezi as above; Ctrl+C stops the server when Tezi has finished. The script
