@@ -113,6 +113,12 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 
 ## Testing
 
+- **Hardware logs** (the user's SSH sessions, dmesg, journal, probe output) go to
+  `logs/hardware/vX.Y.Z/<YYYY-MM-DD>_<what>.log` (git-ignored, like `release/`), where `vX.Y.Z` is
+  the image version that was running. The user can drop a log in the project root; read it, then
+  move it there. Logs can contain board details (serial numbers, addresses): never commit or
+  upload them.
+
 - Desktop log on target: `journalctl -b -t labwc` (not `-u labwc`).
 - Full boot test (systemd, seatd, DRM/KMS on virtio-gpu):
   `build-qemu-test/run-kernel-build.sh` once, then
