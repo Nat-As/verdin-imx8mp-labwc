@@ -36,7 +36,8 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
    (`_tezi._tcp`), so Tezi lists it by itself (verified with Tezi on hardware). Ctrl+C stops it.
 5. **After the user confirms the hardware test**: `git push origin main`, wait for CI (`gh run watch`)
    to be green, `git tag -a vX.Y.Z` + `git push origin vX.Y.Z`,
-   `gh release create vX.Y.Z --latest --notes-file release/vX.Y.Z/release-notes.md <assets>`,
+   `gh release create vX.Y.Z --title vX.Y.Z --notes-file release/vX.Y.Z/release-notes.md <assets>`
+   (no `--prerelease`: it becomes the latest release; this host's `gh` has no `--latest`),
    then verify the README download link (download + `sha256sum`) and the shields.io badges.
 
 ## Git
