@@ -1,10 +1,8 @@
 # labwc autostart (system default). Runs once when the session starts.
 # Per-user override: ~/.config/labwc/autostart
 
-# Turn off the 7" DSI panel output if the panel is not connected
-labwc-demo-outputs
-
-# Wallpaper (falls back to a solid colour if the image is missing)
+# Wallpaper first: until it draws, the screen is black (right after the boot
+# splash). Falls back to a solid colour if the image is missing.
 if [ -f /usr/share/backgrounds/labwc-demo/wallpaper.png ]; then
 	swaybg -m fill -i /usr/share/backgrounds/labwc-demo/wallpaper.png >/dev/null 2>&1 &
 else
@@ -13,3 +11,6 @@ fi
 
 # Panel
 waybar >/dev/null 2>&1 &
+
+# Turn off the 7" DSI panel output if the panel is not connected
+labwc-demo-outputs

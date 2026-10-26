@@ -90,6 +90,10 @@ STATE_DIR=/tmp/labwc-session-$(id -u)
 mkdir -p "$STATE_DIR" && chmod 0755 "$STATE_DIR"
 failed_file="$STATE_DIR/failed"
 touch "$failed_file"
+# Written once labwc answers Wayland clients; labwc-splash (labwc.service)
+# ends the boot splash then
+ready_file="$STATE_DIR/ready"
+rm -f "$ready_file"
 
 # First DRM render node (/dev/dri/renderD128: the Vivante GPU; the i.MX8MP
 # display controller has none)
@@ -169,18 +173,25 @@ watch_output() {
 
 # Wait until labwc (pid $1) answers Wayland clients. Stop it if it does not
 # within $LABWC_START_TIMEOUT seconds, e.g. because a GPU driver hangs.
+# True if a compositor in $XDG_RUNTIME_DIR answers Wayland clients
+labwc_answers() {
+    for sock in "${XDG_RUNTIME_DIR:-/tmp}"/wayland-*; do
+        case $sock in *.lock) continue ;; esac
+        [ -S "$sock" ] || continue
+        WAYLAND_DISPLAY=${sock##*/} timeout 5 wlr-randr >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
 watch_startup() {
     pid=$1 marker=$2 t=0
     while [ "$t" -lt "$LABWC_START_TIMEOUT" ]; do
         kill -0 "$pid" 2>/dev/null || return 0
-        for sock in "${XDG_RUNTIME_DIR:-/tmp}"/wayland-*; do
-            case $sock in *.lock) continue ;; esac
-            [ -S "$sock" ] || continue
-            if WAYLAND_DISPLAY=${sock##*/} timeout 5 wlr-randr >/dev/null 2>&1; then
-                log "labwc is up after ${t}s"
-                return 0
-            fi
-        done
+        if labwc_answers; then
+            log "labwc is up after ${t}s"
+            : > "$ready_file"
+            return 0
+        fi
         sleep 1
         t=$((t + 1))
     done
@@ -250,6 +261,15 @@ run_strategy() {
 if [ -n "$WLR_RENDERER" ]; then
     log "using WLR_RENDERER=$WLR_RENDERER (forced in /etc/default/labwc)"
     echo "$WLR_RENDERER (forced)" > "$STATE_DIR/renderer"
+    # Report when labwc is up (for the boot splash); no fallback here
+    (
+        t=0
+        while [ "$t" -lt 240 ]; do
+            labwc_answers && { : > "$ready_file"; exit 0; }
+            sleep 0.5
+            t=$((t + 1))
+        done
+    ) &
     exec labwc $LABWC_ARGS "$@"
 fi
 

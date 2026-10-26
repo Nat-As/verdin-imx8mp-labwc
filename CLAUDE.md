@@ -90,6 +90,16 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   pattern (detects 4x4 tiling), adds LINEAR-tiling and VkBuffer methods; wlroots patch 0005
   `WLR_VK_RENDER_BUFFER` (render to optimal image, vkCmdCopyImageToBuffer into the DMA-BUF bound
   as VkBuffer); strategy `vulkan-buffer`, `vulkan-auto` maps direct/copy/buffer.
+- Boot splash (v0.1.3): Plymouth (meta-oe, bbappend: `drm` on, `initrd` off) with the two-step theme
+  `argos` (`recipes-graphics/argos-boot-splash`; images from `scripts/make-boot-splash.py`: logo cut
+  from the wallpaper + 30 red starburst spinner frames). Kernel fragment `display-builtin.cfg`
+  builds DSIM/sn65dsi83/panel-lvds/pwm-bl/pwm-imx27/HDMI PHY in (display ready before userspace
+  instead of ~6.5 s) and sets fbcon deferred takeover. `u-boot-distro-boot` bbappend: no
+  `console=tty1`, `quiet loglevel=3 logo.nologo`. labwc runs on **tty1** (Plymouth's VT; no
+  TTYReset/VHangup/VTDisallocate, which would make fbcon take over), conflicts with
+  plymouth-quit/getty@tty1; `labwc-splash` deactivates Plymouth before labwc and quits it
+  (`--retain-splash`) when labwc-session writes `/tmp/labwc-session-<uid>/ready`. U-Boot has no
+  video support for this board (no LCDIFv3/DSIM/SN65DSI83 drivers): dark until the kernel.
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm

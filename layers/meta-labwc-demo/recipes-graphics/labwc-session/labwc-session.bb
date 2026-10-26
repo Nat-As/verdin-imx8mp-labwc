@@ -9,6 +9,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = " \
     file://labwc-session \
     file://labwc-demo-outputs \
+    file://labwc-splash \
     file://labwc.service \
     file://labwc-autologin \
     file://labwc.default \
@@ -46,6 +47,7 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 do_install() {
     install -Dm0755 ${WORKDIR}/labwc-session ${D}${bindir}/labwc-session
     install -Dm0755 ${WORKDIR}/labwc-demo-outputs ${D}${bindir}/labwc-demo-outputs
+    install -Dm0755 ${WORKDIR}/labwc-splash ${D}${libexecdir}/labwc-demo/labwc-splash
     install -Dm0644 ${WORKDIR}/labwc.service ${D}${systemd_system_unitdir}/labwc.service
     sed -i -e 's/@DESKTOP_USER@/${DESKTOP_USER}/g' ${D}${systemd_system_unitdir}/labwc.service
     install -Dm0644 ${WORKDIR}/labwc-autologin ${D}${sysconfdir}/pam.d/labwc-autologin
@@ -71,6 +73,7 @@ do_install() {
 
 FILES:${PN} += " \
     ${systemd_system_unitdir}/labwc.service \
+    ${libexecdir}/labwc-demo \
     ${sysconfdir}/xdg \
     ${datadir}/applications \
     ${datadir}/backgrounds \

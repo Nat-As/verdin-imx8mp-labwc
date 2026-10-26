@@ -15,6 +15,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 kernel, disk, work = sys.argv[1:4]
@@ -30,7 +31,8 @@ for p in (ser_path, mon_path):
 qemu = subprocess.Popen([
     "qemu-system-aarch64", "-M", "virt", "-cpu", "cortex-a57", "-smp", "4", "-m", "2048",
     "-kernel", kernel,
-    "-append", "root=/dev/vda2 rw rootwait console=ttyAMA0 console=tty1",
+    # Like the board's boot script: kernel console on serial only, quiet
+    "-append", "root=/dev/vda2 rw rootwait console=ttyAMA0 quiet loglevel=3 logo.nologo",
     "-drive", f"file={disk},if=virtio,format={'qcow2' if disk.endswith('.qcow2') else 'raw'}",
     "-device", "virtio-gpu-pci,xres=1280,yres=800",
     "-device", "virtio-keyboard-pci", "-device", "virtio-tablet-pci",
@@ -86,6 +88,41 @@ def screendump(name):
     subprocess.run(["convert", ppm, os.path.join(work, name + ".png")], check=False)
 
 
+# BOOT_FRAMES=1: screenshot every ~1.5 s from power-on (boot splash, handoff
+# to the desktop) as boot-NNN.png, with the time since power-on in boot-times.txt
+stop_frames = threading.Event()
+
+
+def capture_frames():
+    n = 0
+    start = time.time()
+    times = open(os.path.join(work, "boot-times.txt"), "w")
+    while not stop_frames.is_set() and time.time() - start < 240:
+        ppm = os.path.join(work, "boot-%03d.ppm" % n)
+        try:
+            mon = socket.socket(socket.AF_UNIX)
+            mon.connect(mon_path)
+            mon.sendall(f"screendump {ppm}\n".encode())
+            time.sleep(0.4)
+            mon.close()
+            times.write("boot-%03d %.1f\n" % (n, time.time() - start))
+            times.flush()
+        except OSError:
+            pass
+        n += 1
+        stop_frames.wait(1.1)
+    for i in range(n):
+        ppm = os.path.join(work, "boot-%03d.ppm" % i)
+        if os.path.exists(ppm):
+            subprocess.run(["convert", ppm, ppm[:-4] + ".png"], check=False)
+            os.unlink(ppm)
+
+
+frames_thread = None
+if os.environ.get("BOOT_FRAMES"):
+    frames_thread = threading.Thread(target=capture_frames, daemon=True)
+    frames_thread.start()
+
 MARK = "__CMD_DONE__"
 
 # Accounts of the image (conf/layer.conf of meta-labwc-demo)
@@ -116,6 +153,9 @@ try:
     run("export SYSTEMD_PAGER= SYSTEMD_COLORS=0 TERM=dumb; stty cols 200")
     # Give labwc and the autostart clients time to come up under TCG
     time.sleep(int(os.environ.get("SETTLE", "150")))
+    if frames_thread:
+        stop_frames.set()
+        frames_thread.join()
     screendump("screen-boot")
     diag = []
     for cmd in [
@@ -128,6 +168,8 @@ try:
         "journalctl -b -u seatd --no-pager | tail -15",
         "cat /tmp/labwc-session-*/renderer; echo failed:; cat /tmp/labwc-session-*/failed",
         "labwc-hwaccel-check -q 2>&1 | head -45",
+        "pgrep -a plymouthd || echo 'plymouthd not running'; systemctl is-active plymouth-start plymouth-quit plymouth-quit-wait getty@tty1 labwc; cat /proc/cmdline",
+        "journalctl -b --no-pager -o short-monotonic -u plymouth-start -u labwc | grep -iE 'plymouth|splash|Started|Starting' | head -20",
         "ls -la /dev/dri; id dev",
         f"env | grep DISPLAY; sudo -u {DESKTOP} -i sh -c 'env | grep -E DISPLAY'",
         "grep -E '^root:' /etc/shadow | cut -d: -f1-2; cat /etc/default/dropbear",

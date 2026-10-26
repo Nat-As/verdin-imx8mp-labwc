@@ -42,7 +42,11 @@ IMAGE_INSTALL += " \
 "
 
 # --- labwc desktop ------------------------------------------------------------
+# Boot splash (Plymouth, Alakai logo and spinner) from the moment the display
+# comes up until the desktop runs; see argos-boot-splash and labwc.service
 IMAGE_INSTALL += " \
+    plymouth \
+    argos-boot-splash \
     labwc-session \
     labwc-demo-admin \
     wlr-randr \

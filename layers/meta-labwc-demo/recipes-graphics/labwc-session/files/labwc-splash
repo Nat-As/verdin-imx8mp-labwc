@@ -1,0 +1,33 @@
+#!/bin/sh
+# Boot splash handoff between Plymouth and labwc, run as root by
+# labwc.service:
+#   labwc-splash deactivate USER       before labwc starts: Plymouth stops
+#                                      drawing and releases the display (its
+#                                      last frame stays on screen)
+#   labwc-splash quit-when-ready USER  after labwc started: wait until
+#                                      labwc-session reports that labwc answers
+#                                      Wayland clients (at most 60 s), then
+#                                      end Plymouth, keeping the screen as is
+command -v plymouth >/dev/null 2>&1 || exit 0
+uid=$(id -u "$2" 2>/dev/null) || exit 0
+ready=/tmp/labwc-session-$uid/ready
+
+case $1 in
+deactivate)
+    rm -f "$ready"
+    plymouth --ping 2>/dev/null && plymouth deactivate
+    ;;
+quit-when-ready)
+    plymouth --ping 2>/dev/null || exit 0
+    i=0
+    while [ ! -e "$ready" ] && [ "$i" -lt 600 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    plymouth quit --retain-splash
+    ;;
+*)
+    echo "usage: $0 deactivate|quit-when-ready USER" >&2
+    exit 2
+    ;;
+esac

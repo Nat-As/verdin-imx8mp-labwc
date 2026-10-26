@@ -16,6 +16,7 @@ used as the base for GUI- and machine-learning-heavy applications.
 
 | | Included |
 |---|---|
+| Boot | Boot splash (Alakai logo and spinner) from the moment the display comes up until the desktop is ready; no kernel or boot messages on the screen |
 | Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (OpenGL ES), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
 | GPU | Vivante GC7000UL: Vulkan, OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `vulkaninfo`, `clinfo`, `glmark2`, `gmem_info` |
 | NPU | 2.3 TOPS NPU: OpenVX with NN extensions, RapidOpenVX, TIM-VX, TensorFlow Lite 2.16 (C++ and Python `tflite_runtime`) with the VX delegate |
@@ -30,12 +31,12 @@ used as the base for GUI- and machine-learning-heavy applications.
 
 ## Download and install
 
-**Pre-release v0.1.2:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar)** (458 MB)
+**Pre-release v0.1.3:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar)** (458 MB)
 
-SHA-256: `8e679b5edfa48fb1c14a0c11e99554bccec88609e92fdae1261d52a000972546`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.2),
+SHA-256: `709e150f5431aa1a23cbd584da7ec568dd49148bf87a137825563332b9b86592`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v0.1.3/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v0.1.3),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -43,13 +44,17 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.2.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v0.1.3.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
 
 The board boots into the labwc desktop on the 7" DSI display and the HDMI output. The Mallow device
 tree and the display overlays are selected automatically.
+
+During boot the displays stay dark while the bootloader and the kernel start (about 3 seconds),
+then show the Alakai logo with a spinner until the desktop takes over. Boot messages go to the
+serial console (Mallow USB debug port) only.
 
 <details>
 <summary>Installing over the network instead of a USB stick</summary>
@@ -246,6 +251,7 @@ desktop user is) or as root.
 | fish | `/etc/fish/` (per user: `~/.config/fish/`) |
 | Session settings (renderer order, debug logging) | `/etc/default/labwc` |
 | Display overlays | `/boot/overlays.txt` (reboot after a change) |
+| Boot splash | Theme `/usr/share/plymouth/themes/argos/`, settings `/etc/plymouth/plymouthd.conf` |
 
 After a desktop configuration change, select **Restart session** in the desktop menu, or run
 `sudo systemctl restart labwc` as `alakai_admin`.
@@ -273,7 +279,12 @@ System commands below need `sudo`, so run them as `alakai_admin`.
 - **Using the Toradex DSI-to-HDMI adapter instead of the 7" display:** in `/boot/overlays.txt`, replace
   `verdin-imx8mp_panel-cap-touch-7inch-dsi_overlay.dtbo` with
   `verdin-imx8mp_dsi-to-hdmi_overlay.dtbo` and reboot.
-- **Return to the text console:** `sudo systemctl stop labwc`
+- **Text console:** press **Ctrl+Alt+F2** for a login prompt (**Ctrl+Alt+F1** returns to the
+  desktop), or stop the desktop with `sudo systemctl stop labwc`, which switches to it.
+- **See the boot messages on the screen / boot without the splash:** on the board, run
+  `sudo fw_setenv tdxargs "loglevel=7 plymouth.enable=0 console=tty1"` and reboot; remove it again
+  with `sudo fw_setenv tdxargs`. The full kernel log is always available with `dmesg`, and on the
+  serial console.
 
 ### Expected kernel messages
 

@@ -1,4 +1,4 @@
-# System unit that starts labwc on tty7 as the unprivileged desktop user
+# System unit that starts labwc on tty1 as the unprivileged desktop user
 # (@DESKTOP_USER@, see LABWC_DEMO_DESKTOP_USER).
 #
 # Seat/device access: seatd (seatd.service, socket group "video") opens the
@@ -9,6 +9,13 @@
 # logind is deliberately not used as the libseat backend: on this distro
 # logind authorises Session.Activate via polkit, and the image ships no
 # polkit daemon (see meta-labwc-demo/recipes-core/seatd).
+#
+# Boot splash handoff (Plymouth, theme argos): labwc runs on tty1, the VT
+# Plymouth draws on, so there is no VT switch between splash and desktop.
+# Like GDM, it conflicts with plymouth-quit.service: instead of Plymouth
+# quitting (and clearing the screen) on its own, labwc-splash deactivates
+# Plymouth right before labwc starts (Plymouth releases the display, its last
+# frame stays visible) and quits it once labwc answers Wayland clients.
 [Unit]
 Description=labwc Wayland compositor (autologin session for user @DESKTOP_USER@)
 Documentation=man:labwc(1) https://labwc.github.io/
@@ -16,7 +23,11 @@ Documentation=man:labwc(1) https://labwc.github.io/
 # Start after logins are permitted.
 Requires=systemd-user-sessions.service
 After=systemd-user-sessions.service
-After=plymouth-quit-wait.service
+
+# Boot splash: take over from Plymouth (see above); tty1 is ours.
+After=plymouth-start.service plymouth-quit.service getty@tty1.service
+Conflicts=plymouth-quit.service getty@tty1.service
+OnFailure=plymouth-quit.service
 
 # Seat management.
 Requires=seatd.service
@@ -32,7 +43,7 @@ Before=graphical.target
 # A virtual terminal is required.
 ConditionPathExists=/dev/tty0
 
-# Give up (and leave the text console on tty1) if labwc keeps failing.
+# Give up (and quit the boot splash) if labwc keeps failing.
 StartLimitIntervalSec=120
 StartLimitBurst=5
 
@@ -49,13 +60,18 @@ EnvironmentFile=-/etc/default/labwc
 ExecStartPre=-/usr/bin/udevadm wait --timeout=30 /dev/dri/card0
 ExecStartPre=-/bin/sh -c "ls /dev/dri/by-path/*gpu* >/dev/null 2>&1 && /usr/bin/udevadm wait --timeout=30 /dev/dri/card1"
 # seatd binds the compositor to the VT that is active when it connects, so
-# bring tty7 to the foreground first ("+" = run as root).
-ExecStartPre=+/usr/bin/chvt 7
+# bring tty1 to the foreground first ("+" = run as root). Then let Plymouth
+# release the display (see above).
+ExecStartPre=+/usr/bin/chvt 1
+ExecStartPre=-+/usr/libexec/labwc-demo/labwc-splash deactivate @DESKTOP_USER@
 
 ExecStart=/usr/bin/labwc-session
 
-# Back to the text console when the session ends or fails.
-ExecStopPost=+/usr/bin/chvt 1
+# End the boot splash once the desktop is up (waits at most 60 s)
+ExecStartPost=-+/usr/libexec/labwc-demo/labwc-splash quit-when-ready @DESKTOP_USER@
+
+# Text console on tty2 when the session ends or fails (Ctrl+Alt+F2)
+ExecStopPost=+/usr/bin/chvt 2
 
 User=@DESKTOP_USER@
 Group=@DESKTOP_USER@
@@ -64,11 +80,13 @@ WorkingDirectory=~
 # Full user session (XDG_RUNTIME_DIR, logind session, user D-Bus).
 PAMName=labwc-autologin
 
-# A virtual terminal is needed.
-TTYPath=/dev/tty7
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
+# A virtual terminal is needed. It is not reset, hung up or cleared: writing
+# to it would make the kernel's framebuffer console take over the display
+# and replace the splash with a black text screen.
+TTYPath=/dev/tty1
+TTYReset=no
+TTYVHangup=no
+TTYVTDisallocate=no
 
 # Fail to start if not controlling the tty.
 StandardInput=tty-fail
@@ -79,7 +97,7 @@ StandardError=journal
 SyslogIdentifier=labwc
 
 # Show up in 'w' and 'who'.
-UtmpIdentifier=tty7
+UtmpIdentifier=tty1
 UtmpMode=user
 
 # Also restart after "Exit" from the menu; stop with: systemctl stop labwc

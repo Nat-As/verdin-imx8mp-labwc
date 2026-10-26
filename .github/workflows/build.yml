@@ -29,7 +29,8 @@ jobs:
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-session \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-wayland.sh \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart \
-            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-demo-outputs
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-demo-outputs \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-splash
           shellcheck --severity=warning -s bash \
             layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-gpu-probe \
             layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-hwaccel-check
@@ -96,7 +97,8 @@ jobs:
                     tree man-db man-pages gzip git labwc-demo-admin \
                     python3-scipy python3-pandas python3-matplotlib opencv \
                     qtbase qtwayland python3-pyqt6 labwc-demo-gpu-tools clinfo \
-                    rapidopenvx tim-vx tensorflow-lite tensorflow-lite-vx-delegate; do
+                    rapidopenvx tim-vx tensorflow-lite tensorflow-lite-vx-delegate \
+                    plymouth argos-boot-splash; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
           done
           for pn in weston connman; do
