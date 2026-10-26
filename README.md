@@ -23,8 +23,8 @@ OpenCV.
   <a href="https://opencv.org"><img src="docs/logos/opencv.png" height="34" alt="OpenCV" title="OpenCV"></a>
   <a href="https://www.tensorflow.org/lite"><img src="docs/logos/tensorflow.png" height="34" alt="TensorFlow Lite" title="TensorFlow Lite"></a>
   <a href="https://dotnet.microsoft.com"><img src="docs/logos/dotnet.png" height="34" alt=".NET" title=".NET"></a>
+  <a href="https://avaloniaui.net"><img src="docs/logos/avalonia.png" height="34" alt="Avalonia" title="Avalonia"></a>
   <a href="https://www.qt.io"><img src="docs/logos/qt.png" height="34" alt="Qt" title="Qt"></a>
-  <a href="https://gstreamer.freedesktop.org"><img src="docs/logos/gstreamer.png" height="34" alt="GStreamer" title="GStreamer"></a>
 </p>
 
 | | Included |
@@ -38,7 +38,7 @@ OpenCV.
 | Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
 | Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
-| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, Avalonia on Wayland, OpenGL ES) |
+| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, Avalonia 12.1.4 on Wayland, OpenGL ES) |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV (with OpenCL), TensorFlow Lite, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
 | Drivers | All drivers of the Toradex kernel (Mallow peripherals, 7" DSI display, Wi-Fi/Bluetooth), Realtek r8152 USB Ethernet |
@@ -358,5 +358,5 @@ Tezi shows before installing. License texts for every package are installed in
 `/usr/share/common-licenses/` on the board.
 
 The logos above are trademarks of their owners (OpenGL ES, OpenCL and OpenVX: The Khronos
-Group; OpenCV: OpenCV team; TensorFlow: Google; .NET: Microsoft; Qt: The Qt Company; Wayland and
-GStreamer: their projects) and only identify the software that the image uses.
+Group; OpenCV: OpenCV team; TensorFlow: Google; .NET: Microsoft; Avalonia: AvaloniaUI OÜ; Qt: The
+Qt Company; Wayland: its project) and only identify the software that the image uses.
