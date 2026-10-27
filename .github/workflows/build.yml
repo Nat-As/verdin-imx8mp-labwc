@@ -100,7 +100,8 @@ jobs:
                     python3-scipy python3-pandas python3-matplotlib opencv \
                     qtbase qtwayland python3-pyqt6 labwc-demo-gpu-tools clinfo \
                     rapidopenvx tim-vx tensorflow-lite tensorflow-lite-vx-delegate \
-                    plymouth argos-boot-splash dotnet opencvsharp gpu-test opencv-cs-check; do
+                    plymouth argos-boot-splash dotnet opencvsharp gpu-test opencv-cs-check \
+                    temurin-jre; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
           done
           for pn in weston connman; do

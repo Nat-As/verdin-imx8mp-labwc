@@ -13,7 +13,7 @@ shows on the **Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enable
 The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (OpenGL ES, OpenCL,
 OpenVX, G2D, TensorFlow Lite with the NPU delegate, hardware video codecs), so it can be used as
 the base for GUI- and machine-learning-heavy applications, including C# applications on .NET with
-OpenCV.
+OpenCV and Java applications.
 
 <p>
   <a href="https://wayland.freedesktop.org"><img src="docs/logos/wayland.png" height="34" alt="Wayland" title="Wayland"></a>
@@ -39,18 +39,19 @@ OpenCV.
 | Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
 | C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, Avalonia 12.1.4 on Wayland, OpenGL ES) |
+| Java 25 LTS | Java Runtime Environment: Eclipse Temurin JRE 25.0.5 (OpenJDK HotSpot), `java`, `keytool`, `jfr`, `jwebserver`; `JAVA_HOME` set |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV (with OpenCL), TensorFlow Lite, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
 | Drivers | All drivers of the Toradex kernel (Mallow peripherals, 7" DSI display, Wi-Fi/Bluetooth), Realtek r8152 USB Ethernet |
 
 ## Download and install
 
-**Release v1.0.0:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar)** (634 MB)
+**Release v1.0.1:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar)** (642 MB)
 
-SHA-256: `f501d47d6c16ea6c11b7bb0bec7cdcda66cf50d8edb101920b696c2ad87c9f9c`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.0/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v1.0.0),
+SHA-256: `392ad0ad905c7f4eb95bc165700e89ffb3db6d01b72463f35c6f31a3320f2ece`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v1.0.1),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -58,7 +59,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -77,9 +78,9 @@ In recovery mode, Tezi also runs a network over the USB OTG cable (USB NCM/RNDIS
 image to Tezi over that link and announces it with Zeroconf, so Tezi lists it by itself:
 
 ```sh
-./serve-tezi.sh v1.0.0                      # release/v1.0.0/...Tezi_v1.0.0.tar
+./serve-tezi.sh v1.0.1                      # release/v1.0.1/...Tezi_v1.0.1.tar
 ./serve-tezi.sh build                       # the current build
-./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.0.tar
+./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar
 ```
 
 Then install it in Tezi as above; Ctrl+C stops the server when Tezi has finished. The script
@@ -286,6 +287,17 @@ dotnet add package OpenCvSharp4 --version 4.6.0.20220608 --source /usr/share/nug
 
 Do not add the `OpenCvSharp4.runtime.*` packages: the native library comes with the image. The
 source of `opencv-cs-check` is in `/usr/share/dotnet-examples/OpenCvCheck/` as an example.
+
+### Java
+
+The Java 25 (LTS) runtime is installed: the [Eclipse Temurin](https://adoptium.net) JRE (OpenJDK
+HotSpot) in `/usr/lib/jvm/temurin-25-jre`, with `java`, `keytool`, `jfr`, `jwebserver`,
+`jrunscript` and `rmiregistry` in the `PATH` and `JAVA_HOME` set for sh and fish. Run applications
+with `java -jar app.jar` or `java -cp app.jar Main`. It is a runtime only, without the compiler
+(`javac`, and `java Hello.java` source launching): build the JARs on the PC with any JDK up to 25.
+
+Java programs run headless (console, network and server applications, image processing with
+`java.awt.image`). AWT/Swing windows need an X server, and the desktop has no X11 or Xwayland.
 
 ### Configuration
 

@@ -136,6 +136,12 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 - Serial ports from C#: .NET 10's `System.IO.Ports` NuGet package (with
   `runtime.linux-arm64.runtime.native.System.IO.Ports`) covers it; the user decided against Mono
   and RJCP SerialPortStream (v0.2.1).
+- Java (v1.0.1): `recipes-devtools/java/temurin-jre_25.0.5.bb`, Eclipse Temurin JRE 25 LTS binary
+  (aarch64 tarball from GitHub, build number in `JAVA_BUILD`; versions:
+  `https://api.adoptium.net/v3/info/available_releases`) in `/usr/lib/jvm/temurin-25-jre`, tools
+  symlinked into `/usr/bin`, `JAVA_HOME` via `/etc/profile.d/java.sh` and
+  `/etc/fish/conf.d/java.fish`. LTS chosen over the newest feature release (27). Bundles its own
+  libfreetype (`EXCLUDE_FROM_SHLIBS`); AWT/Swing need X11, which the desktop doesn't have.
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
