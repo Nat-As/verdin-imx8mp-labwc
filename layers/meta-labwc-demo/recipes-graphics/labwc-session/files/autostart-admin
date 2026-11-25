@@ -1,0 +1,22 @@
+# labwc autostart of the admin user's unattended desktop
+# (labwc-admin.service, LABWC_DEMO_SESSION=admin): a virtual output without a
+# display, used through the remote desktop (argos-remote). Runs once when the
+# session starts.
+
+# Size of the virtual output (LABWC_ADMIN_RESOLUTION, /etc/default/labwc-admin)
+output=$(wlr-randr 2>/dev/null | awk '/^[^ \t]/ { print $1; exit }')
+if [ -n "$output" ]; then
+	wlr-randr --output "$output" --custom-mode "${LABWC_ADMIN_RESOLUTION:-1280x800}"
+fi
+
+if [ -f /usr/share/backgrounds/labwc-demo/wallpaper.png ]; then
+	swaybg -m fill -i /usr/share/backgrounds/labwc-demo/wallpaper.png >/dev/null 2>&1 &
+else
+	swaybg -c '#1d3557' >/dev/null 2>&1 &
+fi
+
+# Panel
+waybar >/dev/null 2>&1 &
+
+# Remote desktop server for this desktop
+systemd-cat -t argos-remote argos-remote-session admin "$output"

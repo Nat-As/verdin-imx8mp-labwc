@@ -1,0 +1,46 @@
+# Unattended desktop of the admin user (@ADMIN_USER@): labwc on a virtual
+# (headless) output, no display or input devices, used through the remote
+# desktop (RustDesk, argos-remote). Runs in parallel with the touch screen
+# session (labwc.service). See /etc/default/labwc-admin.
+#
+# Like labwc.service, PAM (pam_systemd) creates a logind session, which
+# provides XDG_RUNTIME_DIR and the user's systemd instance and D-Bus session
+# bus (portals, PipeWire, the RustDesk server). No seat or VT is needed.
+# Disable with: sudo systemctl disable --now labwc-admin
+[Unit]
+Description=labwc unattended desktop of the admin user @ADMIN_USER@ (headless, remote desktop)
+Documentation=man:labwc(1)
+
+Requires=systemd-user-sessions.service
+After=systemd-user-sessions.service
+Wants=dbus.socket
+After=dbus.socket systemd-logind.service
+
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=LABWC_DEMO_SESSION=admin
+# Rendered on the CPU: it is only seen through the remote desktop, and the
+# GPU stays with the touch screen. Override in /etc/default/labwc-admin.
+Environment=LABWC_RENDERERS=pixman
+EnvironmentFile=-/etc/default/labwc-admin
+ExecStart=/usr/bin/labwc-session
+
+User=@ADMIN_USER@
+Group=@ADMIN_USER@
+WorkingDirectory=~
+PAMName=labwc-autologin
+
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+# journalctl -b -t labwc-admin
+SyslogIdentifier=labwc-admin
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

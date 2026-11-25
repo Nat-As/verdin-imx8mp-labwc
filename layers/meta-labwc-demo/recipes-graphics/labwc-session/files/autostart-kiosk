@@ -1,0 +1,17 @@
+# labwc autostart of the kiosk session (LABWC_DEMO_SESSION=kiosk in
+# /etc/default/labwc): the GPU Test app full screen on the touch screen and
+# the remote desktop mirror of it. Runs once when the session starts.
+
+# Wallpaper behind the app while it starts
+if [ -f /usr/share/backgrounds/labwc-demo/wallpaper.png ]; then
+	swaybg -m fill -i /usr/share/backgrounds/labwc-demo/wallpaper.png >/dev/null 2>&1 &
+else
+	swaybg -c '#000000' >/dev/null 2>&1 &
+fi
+
+# Turn off the 7" DSI panel output if the panel is not connected
+labwc-demo-outputs
+
+# App (restarted when it exits) and remote desktop mirror
+# (log: journalctl -t labwc-kiosk)
+systemd-cat -t labwc-kiosk /usr/libexec/labwc-demo/labwc-kiosk &

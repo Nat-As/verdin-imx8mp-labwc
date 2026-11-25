@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Check the remote desktop path of a session without a RustDesk client.
+
+  portal-test [--png FILE] [--click X Y]
+
+Runs in the session's user bus (use "argos-remote test SESSION"). Does what
+RustDesk's server does: opens an xdg-desktop-portal RemoteDesktop session with
+pointer and keyboard and a ScreenCast monitor source, starts it, reads one
+frame from the PipeWire stream (GStreamer pipewiresrc ! videoconvert) and
+saves it as PNG. --click moves the pointer to X,Y (stream pixels) and clicks
+the left button through the portal, then saves a second frame (FILE with
+"-after-click" appended), so the input path can be checked as well.
+"""
+import os
+import sys
+import time
+
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gio, GLib, Gst  # noqa: E402
+
+BUS = "org.freedesktop.portal.Desktop"
+PATH = "/org/freedesktop/portal/desktop"
+RD = "org.freedesktop.portal.RemoteDesktop"
+SC = "org.freedesktop.portal.ScreenCast"
+BTN_LEFT = 0x110
+TIMEOUT = 20
+
+
+class Portal:
+    def __init__(self):
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.sender = self.bus.get_unique_name()[1:].replace(".", "_")
+        self.counter = 0
+
+    def request(self, iface, method, args_before, options):
+        """Call a portal method that answers with a Request/Response."""
+        self.counter += 1
+        token = f"argos{os.getpid()}_{self.counter}"
+        path = f"/org/freedesktop/portal/desktop/request/{self.sender}/{token}"
+        result = {}
+        loop = GLib.MainLoop()
+
+        def on_response(_bus, _sender, _path, _iface, _signal, params):
+            code, results = params.unpack()
+            result["code"] = code
+            result["results"] = results
+            loop.quit()
+
+        # Subscribe before the call (the portal's Request path convention)
+        sub = self.bus.signal_subscribe(None, "org.freedesktop.portal.Request", "Response",
+                                        path, None, Gio.DBusSignalFlags.NONE, on_response)
+        options = dict(options)
+        options["handle_token"] = GLib.Variant("s", token)
+        sig = "(" + "".join(a[0] for a in args_before) + "a{sv})"
+        params = GLib.Variant(sig, tuple(a[1] for a in args_before) + (options,))
+        self.bus.call_sync(BUS, PATH, iface, method, params, None, Gio.DBusCallFlags.NONE, -1, None)
+        GLib.timeout_add_seconds(TIMEOUT, loop.quit)
+        loop.run()
+        self.bus.signal_unsubscribe(sub)
+        if "code" not in result:
+            raise RuntimeError(f"{method}: no response from the portal within {TIMEOUT}s")
+        if result["code"] != 0:
+            raise RuntimeError(f"{method}: portal response {result['code']} "
+                               "(1 = cancelled by the user, 2 = failed)")
+        return result["results"]
+
+    def call(self, iface, method, sig, args, fd_out=False):
+        if fd_out:
+            ret, fds = self.bus.call_with_unix_fd_list_sync(
+                BUS, PATH, iface, method, GLib.Variant(sig, args), None,
+                Gio.DBusCallFlags.NONE, -1, None, None)
+            return ret, fds
+        return self.bus.call_sync(BUS, PATH, iface, method, GLib.Variant(sig, args),
+                                  None, Gio.DBusCallFlags.NONE, -1, None)
+
+
+def grab_frame(fd, node, png):
+    pipeline = Gst.parse_launch(
+        f"pipewiresrc fd={fd} path={node} always-copy=true num-buffers=3 ! videoconvert ! "
+        f"pngenc snapshot=true ! filesink location={png}")
+    pipeline.set_state(Gst.State.PLAYING)
+    msg = pipeline.get_bus().timed_pop_filtered(
+        TIMEOUT * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+    pipeline.set_state(Gst.State.NULL)
+    if msg is None:
+        raise RuntimeError(f"no frame from PipeWire node {node} within {TIMEOUT}s")
+    if msg.type == Gst.MessageType.ERROR:
+        err, dbg = msg.parse_error()
+        raise RuntimeError(f"GStreamer: {err.message} ({dbg})")
+    return os.path.getsize(png)
+
+
+def main():
+    args = sys.argv[1:]
+    png = f"/tmp/argos-remote-test-{os.getuid()}.png"
+    click = None
+    while args:
+        a = args.pop(0)
+        if a == "--png" and args:
+            png = args.pop(0)
+        elif a == "--click" and len(args) >= 2:
+            click = (float(args.pop(0)), float(args.pop(0)))
+        else:
+            print(__doc__, file=sys.stderr)
+            return 2
+    Gst.init(None)
+    p = Portal()
+
+    version = p.bus.call_sync(BUS, PATH, "org.freedesktop.DBus.Properties", "Get",
+                              GLib.Variant("(ss)", (RD, "version")), None,
+                              Gio.DBusCallFlags.NONE, -1, None).unpack()[0]
+    print(f"RemoteDesktop portal version {version}")
+    res = p.request(RD, "CreateSession", [], {
+        "session_handle_token": GLib.Variant("s", f"argos{os.getpid()}")})
+    session = res["session_handle"]
+    print(f"session {session}")
+    try:
+        p.request(RD, "SelectDevices", [("o", session)], {"types": GLib.Variant("u", 3)})
+        p.request(SC, "SelectSources", [("o", session)], {
+            "types": GLib.Variant("u", 1), "multiple": GLib.Variant("b", False)})
+        res = p.request(RD, "Start", [("o", session), ("s", "")], {})
+        devices = res.get("devices", 0)
+        streams = res.get("streams", [])
+        if not streams:
+            raise RuntimeError("Start returned no streams")
+        node, props = streams[0]
+        size = props.get("size", (0, 0))
+        print(f"started: devices 0x{devices:x} (1 keyboard, 2 pointer), stream node {node}, "
+              f"size {size[0]}x{size[1]}")
+        ret, fds = p.call(SC, "OpenPipeWireRemote", "(oa{sv})", (session, {}), fd_out=True)
+        fd = fds.get(ret.unpack()[0])
+        print(f"PipeWire remote fd {fd}")
+        n = grab_frame(fd, node, png)
+        print(f"frame saved: {png} ({n} bytes)")
+        if click:
+            x, y = click
+            p.call(RD, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", (session, {}, node, x, y))
+            p.call(RD, "NotifyPointerButton", "(oa{sv}iu)", (session, {}, BTN_LEFT, 1))
+            p.call(RD, "NotifyPointerButton", "(oa{sv}iu)", (session, {}, BTN_LEFT, 0))
+            print(f"clicked at {x:.0f},{y:.0f}")
+            time.sleep(1.5)
+            after = png[:-4] + "-after-click.png" if png.endswith(".png") else png + "-after-click"
+            ret, fds = p.call(SC, "OpenPipeWireRemote", "(oa{sv})", (session, {}), fd_out=True)
+            n = grab_frame(fds.get(ret.unpack()[0]), node, after)
+            print(f"frame saved: {after} ({n} bytes)")
+        print("OK")
+        return 0
+    except (RuntimeError, GLib.Error) as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+    finally:
+        try:
+            p.bus.call_sync(BUS, session, "org.freedesktop.portal.Session", "Close", None, None,
+                            Gio.DBusCallFlags.NONE, -1, None)
+        except GLib.Error:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

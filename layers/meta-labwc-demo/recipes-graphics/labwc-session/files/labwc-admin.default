@@ -1,0 +1,13 @@
+# Environment for labwc-admin.service: the admin user's unattended desktop on
+# a virtual output (no display), used through the remote desktop
+# (argos-remote, RustDesk). Apply changes with:
+#   sudo systemctl restart labwc-admin
+# Turn the admin desktop off with: sudo systemctl disable --now labwc-admin
+
+# Size of the virtual output
+LABWC_ADMIN_RESOLUTION=1280x800
+
+# Renderer strategies, as in /etc/default/labwc. Default pixman (CPU): the
+# desktop is only seen remotely. gles2-render uses the GPU, which also lets
+# OpenGL ES applications run on this desktop.
+#LABWC_RENDERERS=pixman

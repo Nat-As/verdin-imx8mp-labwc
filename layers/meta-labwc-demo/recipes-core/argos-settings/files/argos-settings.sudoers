@@ -1,0 +1,6 @@
+# System settings of the Avalonia application (gpu-test): the desktop user
+# (@DESKTOP_USER@) and the admin (@ADMIN_USER@) may run the settings helper as
+# root without a password. The helper checks every argument (time, time zone,
+# host name, display session, reboot/power off).
+@DESKTOP_USER@ ALL=(root) NOPASSWD: /usr/libexec/argos/argos-settings-helper
+@ADMIN_USER@ ALL=(root) NOPASSWD: /usr/libexec/argos/argos-settings-helper

@@ -1,0 +1,53 @@
+From 77308bed4d48ee1cac57ad87f530b372c8605b96 Mon Sep 17 00:00:00 2001
+From: Nat-As <42288915+Nat-As@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 08:05:18 -0500
+Subject: [PATCH] screencast: allow wlr_screencopy without linux-dmabuf
+
+Since the ext-image-copy-capture rework, screencast setup requires
+zwp_linux_dmabuf_v1 next to wlr_screencopy and fails otherwise
+("Compositor supports neither ext_image_copy_capture or wlr_screencopy!").
+A wlroots compositor with the pixman renderer has no linux-dmabuf, but its
+screencopy works with shm buffers, as before. Use shm only in that case.
+
+Also don't dereference a NULL device in xdpw_gbm_device_create(), which is
+called with NULL when the compositor announced no dmabuf feedback device.
+
+Upstream-Status: Pending
+---
+ src/screencast/screencast_common.c | 5 +++++
+ src/screencast/wlr_screencast.c    | 3 +++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/src/screencast/screencast_common.c b/src/screencast/screencast_common.c
+index 111a81d..419397c 100644
+--- a/src/screencast/screencast_common.c
++++ b/src/screencast/screencast_common.c
+@@ -13,6 +13,11 @@
+ #include "logger.h"
+ 
+ struct gbm_device *xdpw_gbm_device_create(drmDevice *device) {
++	if (!device) {
++		// No main device announced by the compositor (no dmabuf feedback)
++		logprint(INFO, "xdpw: no DRM device from the compositor, dmabuf disabled");
++		return NULL;
++	}
+ 	if (!(device->available_nodes & (1 << DRM_NODE_RENDER))) {
+ 		logprint(ERROR, "xdpw: DRM device has no render node");
+ 		return NULL;
+diff --git a/src/screencast/wlr_screencast.c b/src/screencast/wlr_screencast.c
+index 3b6410f..9d3a9eb 100644
+--- a/src/screencast/wlr_screencast.c
++++ b/src/screencast/wlr_screencast.c
+@@ -599,6 +599,9 @@ int xdpw_wlr_screencopy_init(struct xdpw_state *state) {
+ 				logprint(ERROR, "System doesn't support gbm!");
+ 			}
+ 		}
++	} else if (ctx->screencopy_manager) {
++		// e.g. a compositor with the pixman renderer: shared memory only
++		logprint(INFO, "wayland: no linux-dmabuf, using wlr_screencopy with shm buffers");
+ 	} else {
+ 		logprint(ERROR, "Compositor supports neither ext_image_copy_capture or wlr_screencopy!");
+ 		return -1;
+-- 
+2.34.1
+

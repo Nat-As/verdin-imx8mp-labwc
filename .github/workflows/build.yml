@@ -31,17 +31,24 @@ jobs:
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-demo-outputs \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-splash \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/labwc-kiosk \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart-kiosk \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/autostart-admin \
+            layers/meta-labwc-demo/recipes-remote/argos-remote/files/argos-remote-session \
             layers/meta-labwc-demo/recipes-dotnet/gpu-test/files/gpu-test.sh
           shellcheck --severity=warning -s bash \
             layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-gpu-probe \
             layers/meta-labwc-demo/recipes-graphics/labwc-demo-gpu-tools/files/labwc-hwaccel-check \
-            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/gpu-benchmark
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/gpu-benchmark \
+            layers/meta-labwc-demo/recipes-remote/argos-remote/files/argos-remote-server \
+            layers/meta-labwc-demo/recipes-core/argos-settings/files/argos-settings-helper
 
       - name: XML (labwc config, repo manifest)
         run: |
           xmllint --noout \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/rc.xml \
             layers/meta-labwc-demo/recipes-graphics/labwc-session/files/menu.xml \
+            layers/meta-labwc-demo/recipes-graphics/labwc-session/files/rc-kiosk.xml \
             manifests/labwc-demo.xml
 
       - name: JSON (waybar config)
@@ -54,7 +61,12 @@ jobs:
           PY
 
       - name: Python
-        run: python3 -m py_compile build-qemu-test/qemu-boot-test.py layers/meta-labwc-demo/scripts/nuget-inc.py
+        run: |
+          python3 -m py_compile build-qemu-test/qemu-boot-test.py layers/meta-labwc-demo/scripts/nuget-inc.py
+          for f in argos-remote portal-test; do
+            python3 -c "import sys; compile(open(sys.argv[1]).read(), sys.argv[1], 'exec')" \
+              layers/meta-labwc-demo/recipes-remote/argos-remote/files/$f
+          done
 
   yocto:
     needs: lint
@@ -101,7 +113,8 @@ jobs:
                     qtbase qtwayland python3-pyqt6 labwc-demo-gpu-tools clinfo \
                     rapidopenvx tim-vx tensorflow-lite tensorflow-lite-vx-delegate \
                     plymouth argos-boot-splash dotnet opencvsharp gpu-test opencv-cs-check \
-                    temurin-jre; do
+                    temurin-jre rustdesk argos-remote argos-settings xdg-desktop-portal-wlr \
+                    pipewire wireplumber xdg-desktop-portal; do
             grep -qx "$pn" pn-buildlist || { echo "missing from build: $pn"; exit 1; }
           done
           for pn in weston connman; do
@@ -110,6 +123,8 @@ jobs:
           # GPU renderers and OpenCL in the build configuration
           bitbake -e wlroots-0.17 | grep -E '^EXTRA_OEMESON=.*-Drenderers=gles2 ' > /dev/null \
             || { echo "wlroots is not built with (only) the gles2 renderer"; exit 1; }
+          bitbake -e xdg-desktop-portal-wlr | grep -E '^PV="0\.9\.0"' > /dev/null \
+            || { echo "xdg-desktop-portal-wlr is not our 0.9.0 (RemoteDesktop)"; exit 1; }
           bitbake -e opencv | grep -E '^PACKAGECONFIG=.*\bopencl\b' > /dev/null \
             || { echo "opencv is not built with OpenCL"; exit 1; }
           echo "$(wc -l < pn-buildlist) recipes in the labwc-demo-image build"

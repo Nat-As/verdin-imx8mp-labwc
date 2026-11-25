@@ -1,0 +1,52 @@
+#!/bin/sh
+# Kiosk session (LABWC_DEMO_SESSION=kiosk), started from the kiosk autostart:
+# runs the GPU Test app full screen on the touch screen and restarts it when
+# it exits, and starts the remote desktop mirror of that screen.
+#
+#   labwc-kiosk               run the app (loop)
+#   labwc-kiosk --output      print the output the app and the mirror use
+#
+# The output is the 7" touch panel (LVDS-1) if it is enabled
+# (labwc-demo-outputs turns it off when the panel is absent), otherwise the
+# first enabled output (HDMI). Override with LABWC_KIOSK_OUTPUT in
+# /etc/default/labwc. The app's log: journalctl -t gpu-test
+
+kiosk_output() {
+    if [ -n "${LABWC_KIOSK_OUTPUT:-}" ]; then
+        echo "$LABWC_KIOSK_OUTPUT"
+        return
+    fi
+    # wlr-randr: output names start a line, "  Enabled: yes|no" follows
+    wlr-randr 2>/dev/null | awk -v panel="${LABWC_PANEL_OUTPUT:-LVDS-1}" '
+        /^[^ \t]/ { name = $1 }
+        /^[ \t]+Enabled: yes/ { if (!first) first = name; if (name == panel) found = name }
+        END { print (found ? found : first) }'
+}
+
+if [ "${1:-}" = --output ]; then
+    kiosk_output
+    exit 0
+fi
+
+ARGOS_KIOSK_OUTPUT=$(kiosk_output)
+export ARGOS_KIOSK_OUTPUT
+echo "labwc-kiosk: app on output ${ARGOS_KIOSK_OUTPUT:-(default)}"
+
+# Remote desktop: mirror of this screen (argos-remote)
+if command -v argos-remote-session >/dev/null 2>&1; then
+    argos-remote-session kiosk "$ARGOS_KIOSK_OUTPUT"
+fi
+
+# The app; if it keeps exiting right away, wait longer between restarts
+while :; do
+    start=$(date +%s)
+    systemd-cat -t gpu-test gpu-test --kiosk
+    rc=$?
+    ran=$(( $(date +%s) - start ))
+    echo "labwc-kiosk: gpu-test --kiosk ended (exit code $rc) after ${ran}s, restarting"
+    if [ "$ran" -lt 10 ]; then
+        sleep 10
+    else
+        sleep 1
+    fi
+done

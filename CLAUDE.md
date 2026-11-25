@@ -60,6 +60,7 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
 | `serve-tezi.sh` | Serve a release/build Tezi image to Toradex Easy Installer over the network (USB NCM) |
 | `layers/meta-labwc-demo/scripts/nuget-inc.py` | Generate a recipe's pinned NuGet `SRC_URI` `.inc` from a host restore |
 | `config/image-packages.conf`, `config/python-packages.conf` | Software lists (included from `build/conf/local.conf`) |
+| `layers/meta-labwc-demo/recipes-remote/` | RustDesk binary recipe and `argos-remote` (per-session RustDesk servers, CLI, portal self-test) |
 | `config/release.conf` | Image version `LABWC_DEMO_VERSION` (boot animation title, `/etc/argos-release`) |
 | `docs/logos/` | Logos of the stack for the README (white tiles, readable in light and dark themes) |
 | `build/conf/local.conf` | MACHINE, EULA, threads, Fortran toolchain, display overlays (7" DSI + HDMI) |
@@ -142,6 +143,46 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   symlinked into `/usr/bin`, `JAVA_HOME` via `/etc/profile.d/java.sh` and
   `/etc/fish/conf.d/java.fish`. LTS chosen over the newest feature release (27). Bundles its own
   libfreetype (`EXCLUDE_FROM_SHLIBS`); AWT/Swing need X11, which the desktop doesn't have.
+- Sessions (v1.0.2): `labwc-session` reads `LABWC_DEMO_SESSION` (`/etc/default/labwc`, default
+  `kiosk`): `kiosk` = `labwc -C /etc/xdg/labwc-kiosk` (autostart runs `labwc-kiosk`: picks the
+  output, LVDS-1 if enabled else the first, starts the remote mirror, loops `gpu-test --kiosk`
+  via `systemd-cat -t gpu-test`), `desktop` = the old desktop, `admin` = `labwc-admin.service`
+  (alakai_admin, PAM session without seat/VT, `WLR_BACKENDS=headless`, pixman,
+  `/etc/xdg/labwc-admin`, 1280x800 via wlr-randr `--custom-mode`).
+- **Avalonia Application design rule** (user): the GPU Test app (`recipes-dotnet/gpu-test`) has a
+  persistent bottom nav bar on every page, left to right Home (molecule), Hamburger (unused),
+  Book (unused), Gear (Settings). Settings = Network/Display/Date & Time/Remote Desktop/System/
+  About, touch-first with an in-app on-screen keyboard (Fluent theme). Code-only UI in `Pages/`,
+  `Ui/`, `Services/`. Privileged settings via `recipes-core/argos-settings`
+  (`/usr/libexec/argos/argos-settings-helper`, sudo NOPASSWD for desktop+admin users, strict
+  argument checks: time-set, ntp, timezone, rtc-read/sync, hostname, session-mode, reboot,
+  poweroff); NetworkManager directly with nmcli (`auth-polkit=false`); backlight writable by
+  group video (udev rule). UI checked on the host with an Avalonia.Headless screenshot harness
+  (scratchpad only, not shipped).
+- Remote desktop (v1.0.2): `recipes-remote/rustdesk` (1.5.3 aarch64 .deb, binary, no root
+  service) + `recipes-remote/argos-remote`. One RustDesk per session as systemd **user** unit
+  `argos-remote.service` (`argos-remote-session kiosk|admin [OUTPUT]` from the autostart imports
+  WAYLAND_DISPLAY etc. into the user manager): `rustdesk --quick_support --server` with
+  `RUSTDESK_FORCED_DISPLAY_SERVER=wayland`. Why: RustDesk's root `--service` follows logind seat0
+  only and injects with uinput; with `argv[1]=="--server"` the server picks uinput input, and
+  `is_server_running()` greps `ps` for "rustdesk --server"; `--quick_support` (Windows-only,
+  dropped by the arg parser) avoids both, so capture+input go through the RemoteDesktop portal.
+  Ports 21118 (kiosk mirror) / 21119 (admin), IDs random 9 digits (RustDesk's MAC-derived ID
+  would collide), passwords random, in `~/.config/argos-remote/` (plaintext password written to
+  RustDesk.toml, RustDesk hashes it); options in RustDesk2.toml `[options]` merged by awk
+  (direct-server, approve-mode=password, allow-hide-cm ...). `argos-remote info|password|restart|
+  test` (python3); `test` = `portal-test` (Gio + GStreamer: RemoteDesktop+ScreenCast session,
+  PNG of a frame, optional click). Status in `/run/argos-remote/<session>.json` (tmpfiles, owned
+  by the session user). WirePlumber video-only (`90-argos-video-only.conf`).
+- Portal: own `xdg-desktop-portal-wlr_0.9.0.bb` + PR #325 (RemoteDesktop, rebased onto v0.9.0,
+  squashed) + bundled ext-image-copy-capture XMLs (BSP wayland-protocols 1.32). meta-freescale
+  sets `COMPATIBLE_HOST:pn-xdg-desktop-portal-wlr:imxgpu = "(null)"` (claims libgbm lacks
+  `gbm_bo_create_with_modifiers2`; this BSP's has it): overridden in the recipe. labwc 0.7.1 has
+  wlr-screencopy, virtual pointer/keyboard. `chooser_type=none` + `output_name` (written per
+  session to `~/.config/xdg-desktop-portal-wlr/config`).
+- PipeWire: meta-freescale `PACKAGECONFIG:remove:mx8-nxp-bsp = "gstreamer"` (a `:remove` can't be
+  undone), so `recipes-multimedia/pipewire` bbappend neutralises the `gstreamer` flag and adds
+  `gst-plugin` (`-Dgstreamer=enabled`, package `gstreamer1.0-pipewire` = RustDesk's pipewiresrc).
 - Hostname: `argos-<serial>` via `recipes-core/set-hostname` bbappend
   (`LABWC_DEMO_HOSTNAME_PREFIX` in layer.conf).
 - DRM on hardware: `card0`/`renderD128` = Vivante (galcore, no connectors), `card1` = imx-drm
@@ -162,6 +203,9 @@ a **labwc** Wayland desktop. Repository: https://github.com/Nat-As/verdin-imx8mp
   upload them.
 
 - Desktop log on target: `journalctl -b -t labwc` (not `-u labwc`).
+- QEMU test extras: `EXTRA_CMDS=<file>` (root commands, output in diag.txt), `PULL_FILES="<guest
+  paths>"` (copied back over the serial console with base64). No RustDesk client is available on
+  the host; `argos-remote test <session> [--click X Y]` exercises the same portal path.
 - Full boot test (systemd, seatd, DRM/KMS on virtio-gpu):
   `build-qemu-test/run-kernel-build.sh` once, then
   `XDG_RUNTIME_DIR=/run/user/1000 python3 build-qemu-test/qemu-boot-test.py build-qemu-test/tmp/deploy/images/qemuarm64/Image <qcow2 overlay of the .wic> <outdir>`

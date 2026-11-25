@@ -1,0 +1,140 @@
+#!/bin/bash
+# argos-settings-helper: the privileged part of the system settings of the
+# Avalonia application (gpu-test, Settings page). The desktop and admin users
+# may run it as root without a password (/etc/sudoers.d/argos-settings):
+#
+#   sudo -n /usr/libexec/argos/argos-settings-helper <command> [args]
+#
+# It is a privilege boundary: every argument is checked against a strict
+# pattern before it is used, and only the commands below exist.
+#
+#   time-set "YYYY-MM-DD HH:MM:SS"  set the system time (switches NTP off; the
+#                                    RTC is set too)
+#   ntp on|off                       automatic time synchronization
+#   timezone Area/City               time zone (must exist in /usr/share/zoneinfo)
+#   rtc-read                         print the hardware clock (RTC)
+#   rtc-sync                         save the system time to the RTC
+#   hostname NAME                    static host name (RFC 1123 label, persists:
+#                                    set-hostname only names an unnamed board)
+#   session-mode kiosk|desktop       display session (LABWC_DEMO_SESSION in
+#                                    /etc/default/labwc), restarts labwc
+#   reboot | poweroff                restart / switch off the board
+#
+# Exit codes: 0 done, 1 failed, 2 usage error or rejected argument.
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 022
+
+LABWC_DEFAULTS=/etc/default/labwc
+ZONEINFO=/usr/share/zoneinfo
+
+usage() {
+	echo "usage: argos-settings-helper time-set 'YYYY-MM-DD HH:MM:SS' | ntp on|off | timezone ZONE |" \
+		"rtc-read | rtc-sync | hostname NAME | session-mode kiosk|desktop | reboot | poweroff" >&2
+	exit 2
+}
+
+reject() {
+	echo "argos-settings-helper: $*" >&2
+	exit 2
+}
+
+fail() {
+	echo "argos-settings-helper: $*" >&2
+	exit 1
+}
+
+nargs() {
+	[ "$1" -eq "$2" ] || usage
+}
+
+[ $# -ge 1 ] || usage
+cmd=$1
+shift
+
+case "$cmd" in
+time-set)
+	nargs $# 1
+	re='^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$'
+	[[ $1 =~ $re ]] || reject "invalid time '$1' (expected YYYY-MM-DD HH:MM:SS)"
+	# set-time is refused while NTP is on
+	timedatectl set-ntp false 2>/dev/null || true
+	timedatectl set-time "$1" || fail "could not set the time"
+	;;
+ntp)
+	nargs $# 1
+	case "$1" in
+	on) timedatectl set-ntp true || fail "could not switch automatic time on" ;;
+	off) timedatectl set-ntp false || fail "could not switch automatic time off" ;;
+	*) reject "expected on or off" ;;
+	esac
+	;;
+timezone)
+	nargs $# 1
+	zone=$1
+	re='^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}$'
+	[[ $zone =~ $re ]] || reject "invalid time zone '$zone'"
+	case "$zone" in *..*) reject "invalid time zone '$zone'" ;; esac
+	[ -f "$ZONEINFO/$zone" ] || reject "unknown time zone '$zone'"
+	timedatectl set-timezone "$zone" || fail "could not set the time zone"
+	;;
+rtc-read)
+	nargs $# 0
+	if command -v hwclock >/dev/null 2>&1; then
+		hwclock --show || fail "could not read the hardware clock"
+	elif [ -r /sys/class/rtc/rtc0/date ]; then
+		echo "$(cat /sys/class/rtc/rtc0/date) $(cat /sys/class/rtc/rtc0/time) UTC"
+	else
+		fail "no hardware clock (RTC) found"
+	fi
+	;;
+rtc-sync)
+	nargs $# 0
+	command -v hwclock >/dev/null 2>&1 || fail "hwclock is not installed"
+	hwclock --systohc || fail "could not write the hardware clock"
+	;;
+hostname)
+	nargs $# 1
+	re='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+	[[ $1 =~ $re ]] || reject "invalid host name '$1' (1-63 letters, digits, hyphens)"
+	hostnamectl set-hostname "$1" || fail "could not set the host name"
+	;;
+session-mode)
+	nargs $# 1
+	case "$1" in
+	kiosk | desktop) mode=$1 ;;
+	*) reject "expected kiosk or desktop" ;;
+	esac
+	tmp=$(mktemp "$LABWC_DEFAULTS.XXXXXX") || fail "could not write $LABWC_DEFAULTS"
+	if [ -f "$LABWC_DEFAULTS" ] && grep -q '^LABWC_DEMO_SESSION=' "$LABWC_DEFAULTS"; then
+		sed "s/^LABWC_DEMO_SESSION=.*/LABWC_DEMO_SESSION=$mode/" "$LABWC_DEFAULTS" >"$tmp"
+	else
+		{
+			[ -f "$LABWC_DEFAULTS" ] && cat "$LABWC_DEFAULTS"
+			echo "LABWC_DEMO_SESSION=$mode"
+		} >"$tmp"
+	fi || {
+		rm -f "$tmp"
+		fail "could not write $LABWC_DEFAULTS"
+	}
+	chmod 0644 "$tmp" && mv "$tmp" "$LABWC_DEFAULTS" || {
+		rm -f "$tmp"
+		fail "could not write $LABWC_DEFAULTS"
+	}
+	# Restart the display session after this command has answered (the
+	# caller is a client of that session)
+	systemctl --no-block restart labwc.service || fail "could not restart labwc.service"
+	;;
+reboot)
+	nargs $# 0
+	systemctl --no-block reboot || fail "could not reboot"
+	;;
+poweroff)
+	nargs $# 0
+	systemctl --no-block poweroff || fail "could not power off"
+	;;
+*)
+	usage
+	;;
+esac

@@ -1,12 +1,15 @@
-SUMMARY = "GPU Test: OpenGL ES demo in C# (.NET)"
-DESCRIPTION = "Renders a slowly rotating cyclohexane molecule (chair \
-conformation, ball-and-stick) with OpenGL ES in an Avalonia window (native \
-Wayland backend, GPU rendered, 40 % opaque background) and shows the measured \
-frame rate. Written in C#, runs on the .NET runtime. Launch it from the \
-application launcher (GPU Test) or with gpu-test."
-# The app is MIT; it ships Avalonia, NWayland, MicroCom, Tmds.DBus.Protocol,
-# SkiaSharp and HarfBuzzSharp (MIT) with the native Skia (BSD-3-Clause) and
-# HarfBuzz (MIT) libraries from NuGet
+SUMMARY = "GPU Test: the Avalonia application of the image (C#, .NET)"
+DESCRIPTION = "Avalonia application (native Wayland backend, GPU rendered) \
+with a navigation bar on every page (Home, Menu, Book, Settings). Home \
+renders a slowly rotating cyclohexane molecule (ball-and-stick) with OpenGL \
+ES and shows the measured frame rate; Settings has the system settings \
+(network, display brightness, date, time and time zone, remote desktop, host \
+name, display session, power, build information) for the touch display, with \
+an on-screen keyboard. Runs full screen in the kiosk session (gpu-test \
+--kiosk) or as a window from the application launcher (GPU Test)."
+# The app is MIT; it ships Avalonia (with its Fluent theme), NWayland,
+# MicroCom, Tmds.DBus.Protocol, SkiaSharp and HarfBuzzSharp (MIT) with the
+# native Skia (BSD-3-Clause) and HarfBuzz (MIT) libraries from NuGet
 LICENSE = "MIT & BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
                     file://${COMMON_LICENSE_DIR}/BSD-3-Clause;md5=550794465ba0ec5312d6919e203a55f9"
@@ -43,5 +46,6 @@ do_install:append() {
 FILES:${PN} += "${datadir}/applications ${datadir}/icons"
 
 # Loaded at run time (P/Invoke, dlopen) by Avalonia.Wayland and GPU Test;
-# EGL/OpenGL ES and GBM come with the GPU driver
-RDEPENDS:${PN} += "wayland libxkbcommon glib-2.0 libdrm fontconfig"
+# EGL/OpenGL ES and GBM come with the GPU driver. The settings use nmcli
+# (NetworkManager), timedatectl (systemd) and the argos-settings helper
+RDEPENDS:${PN} += "wayland libxkbcommon glib-2.0 libdrm fontconfig networkmanager-nmcli argos-settings"

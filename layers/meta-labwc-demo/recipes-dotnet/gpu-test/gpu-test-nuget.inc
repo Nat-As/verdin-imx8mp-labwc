@@ -8,7 +8,7 @@ SRC_URI += " \
     https://api.nuget.org/v3-flatcontainer/avalonia.harfbuzz/12.1.4/avalonia.harfbuzz.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_harfbuzz-12_1_4 \
     https://api.nuget.org/v3-flatcontainer/avalonia.remote.protocol/12.1.4/avalonia.remote.protocol.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_remote_protocol-12_1_4 \
     https://api.nuget.org/v3-flatcontainer/avalonia.skia/12.1.4/avalonia.skia.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_skia-12_1_4 \
-    https://api.nuget.org/v3-flatcontainer/avalonia.themes.simple/12.1.4/avalonia.themes.simple.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_themes_simple-12_1_4 \
+    https://api.nuget.org/v3-flatcontainer/avalonia.themes.fluent/12.1.4/avalonia.themes.fluent.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_themes_fluent-12_1_4 \
     https://api.nuget.org/v3-flatcontainer/avalonia.wayland/12.1.4/avalonia.wayland.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia_wayland-12_1_4 \
     https://api.nuget.org/v3-flatcontainer/avalonia/12.1.4/avalonia.12.1.4.nupkg;unpack=0;subdir=nuget-feed;name=avalonia-12_1_4 \
     https://api.nuget.org/v3-flatcontainer/harfbuzzsharp.nativeassets.linux/8.3.1.3/harfbuzzsharp.nativeassets.linux.8.3.1.3.nupkg;unpack=0;subdir=nuget-feed;name=harfbuzzsharp_nativeassets_linux-8_3_1_3 \
@@ -31,7 +31,7 @@ SRC_URI[avalonia_freedesktop-12_1_4.sha256sum] = "e689791338533943a246d3522055ed
 SRC_URI[avalonia_harfbuzz-12_1_4.sha256sum] = "f52e5c1b6a00886ef46816ed2fc9a2c28844289b1af30bd7ea247e220d20c0cb"
 SRC_URI[avalonia_remote_protocol-12_1_4.sha256sum] = "e115f5143ef0fc745cf171bb926ad1083ed4c833ca977a0eb11bdb0c41605f5c"
 SRC_URI[avalonia_skia-12_1_4.sha256sum] = "f42e12d06df92ae116e5baaac5e0319cec090d990a303edc1afd0e7c202a6e69"
-SRC_URI[avalonia_themes_simple-12_1_4.sha256sum] = "71f3694c5733541d6839ccec06c085603dc5c184a94ac1d4e8065b65d96f3ff1"
+SRC_URI[avalonia_themes_fluent-12_1_4.sha256sum] = "0b2c317ee4dbc9b12c9cb564d4f99b10872b655a450c91a66ac063d9056a3c38"
 SRC_URI[avalonia_wayland-12_1_4.sha256sum] = "8c40cf67a75a7a69184517b2ba97ba6e7be4701cdfe6725b91a68274c9ba7700"
 SRC_URI[avalonia-12_1_4.sha256sum] = "90cf963a0e5fed7fc0e5cd9cefe3c159b78de086272c3ddde94c75cb83f9c4ac"
 SRC_URI[harfbuzzsharp_nativeassets_linux-8_3_1_3.sha256sum] = "7de58e9daffc9dcbe6aeaec2c670dccefd5f69c576a68655e51f8ec82b687295"

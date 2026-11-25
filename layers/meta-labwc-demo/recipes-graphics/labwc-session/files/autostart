@@ -14,3 +14,9 @@ waybar >/dev/null 2>&1 &
 
 # Turn off the 7" DSI panel output if the panel is not connected
 labwc-demo-outputs
+
+# Remote desktop mirror of the touch screen (or the first output), as in the
+# kiosk session
+if command -v argos-remote-session >/dev/null 2>&1; then
+	systemd-cat -t argos-remote argos-remote-session kiosk "$(/usr/libexec/labwc-demo/labwc-kiosk --output)" &
+fi

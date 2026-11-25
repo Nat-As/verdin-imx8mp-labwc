@@ -1,0 +1,3 @@
+# Display brightness from the Settings page of the Avalonia application: the
+# video group (the desktop user) may write the backlight brightness.
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/sh -c 'chgrp video /sys%p/brightness && chmod g+w /sys%p/brightness'"

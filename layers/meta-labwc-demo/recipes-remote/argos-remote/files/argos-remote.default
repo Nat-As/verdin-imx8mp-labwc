@@ -1,0 +1,23 @@
+# Remote desktop (RustDesk) of the labwc demo image, see argos-remote(1):
+#   kiosk  the touch screen session (desktop user), mirrored
+#   admin  the unattended headless desktop of the admin user
+# Apply changes by restarting the sessions:
+#   sudo systemctl restart labwc labwc-admin
+# Show IDs, ports and passwords: sudo argos-remote info
+
+# Enable (1) or disable (0) the RustDesk server per session
+ARGOS_REMOTE_KIOSK=1
+ARGOS_REMOTE_ADMIN=1
+
+# Direct IP access ports (RustDesk client: connect to <board IP>:<port>)
+ARGOS_REMOTE_KIOSK_PORT=21118
+ARGOS_REMOTE_ADMIN_PORT=21119
+
+# Maximum capture frame rate
+ARGOS_REMOTE_MAX_FPS=30
+
+# Own RustDesk server (hbbs/hbbr) instead of RustDesk's public servers, for
+# connections by ID (empty: public servers; direct IP access works without)
+ARGOS_REMOTE_ID_SERVER=
+ARGOS_REMOTE_RELAY_SERVER=
+ARGOS_REMOTE_KEY=

@@ -71,6 +71,32 @@ fi
 # wlroots try its X11 backend, which is not built.
 unset DISPLAY
 
+# Session type (LABWC_DEMO_SESSION in /etc/default/labwc; labwc-admin.service
+# sets admin):
+#   kiosk    the touch screen kiosk: the GPU Test app full screen, nothing
+#            else (configuration /etc/xdg/labwc-kiosk)
+#   desktop  the labwc desktop with panel and launcher (/etc/xdg/labwc, per
+#            user ~/.config/labwc)
+#   admin    the admin user's unattended desktop on a virtual (headless)
+#            output, used through the remote desktop (/etc/xdg/labwc-admin)
+LABWC_DEMO_SESSION=${LABWC_DEMO_SESSION:-kiosk}
+case $LABWC_DEMO_SESSION in
+kiosk)
+    set -- -C /etc/xdg/labwc-kiosk "$@" ;;
+admin)
+    set -- -C /etc/xdg/labwc-admin "$@"
+    # No display or input devices; no seat needed
+    export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
+    export WLR_HEADLESS_OUTPUTS=${WLR_HEADLESS_OUTPUTS:-1}
+    ;;
+desktop) ;;
+*)
+    log "unknown LABWC_DEMO_SESSION '$LABWC_DEMO_SESSION', using desktop"
+    LABWC_DEMO_SESSION=desktop ;;
+esac
+export LABWC_DEMO_SESSION
+log "session type: $LABWC_DEMO_SESSION"
+
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-labwc:wlroots}
 export GDK_BACKEND=${GDK_BACKEND:-wayland}
@@ -108,7 +134,7 @@ kms_card() {
 }
 
 # Use only the display controller as wlroots DRM backend device
-if [ -z "$WLR_DRM_DEVICES" ] && card=$(kms_card); then
+if [ "$LABWC_DEMO_SESSION" != admin ] && [ -z "$WLR_DRM_DEVICES" ] && card=$(kms_card); then
     export WLR_DRM_DEVICES=$card
     log "display device: $card"
 fi

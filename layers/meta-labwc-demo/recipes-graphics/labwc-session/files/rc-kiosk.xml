@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<!--
+  labwc configuration of the kiosk session (LABWC_DEMO_SESSION=kiosk in
+  /etc/default/labwc): the GPU Test app runs full screen on the touch screen.
+  The keyboard shortcuts of the desktop stay available for maintenance with a
+  keyboard (Super+Return: terminal). Full reference: man 5 labwc-config
+-->
+<labwc_config>
+
+  <core>
+    <decoration>server</decoration>
+    <gap>0</gap>
+  </core>
+
+  <theme>
+    <name></name>
+    <cornerRadius>6</cornerRadius>
+    <font place="ActiveWindow" name="DejaVu Sans" size="10" weight="bold" />
+    <font place="InactiveWindow" name="DejaVu Sans" size="10" />
+    <font place="MenuItem" name="DejaVu Sans" size="10" />
+    <font place="OnScreenDisplay" name="DejaVu Sans" size="10" />
+  </theme>
+
+  <keyboard>
+    <default />
+    <keybind key="W-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="W-d">
+      <action name="Execute" command="fuzzel" />
+    </keybind>
+    <keybind key="W-m">
+      <action name="ShowMenu" menu="root-menu" />
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <default />
+  </mouse>
+
+  <!-- Touch input on the 7" panel output (see /etc/xdg/labwc/rc.xml) -->
+  <touch deviceName="" mapToOutput="LVDS-1" />
+
+  <libinput>
+    <device category="default">
+      <tap>yes</tap>
+    </device>
+  </libinput>
+
+  <windowRules>
+    <!-- The app: no title bar (it goes full screen itself) -->
+    <windowRule identifier="gpu-test" serverDecoration="no" />
+    <!--
+      RustDesk helper windows (connection manager, tray) of the remote
+      desktop server must not cover the app on the touch screen
+    -->
+    <windowRule identifier="rustdesk*" skipTaskbar="yes" ignoreFocusRequest="yes">
+      <action name="Iconify" />
+    </windowRule>
+  </windowRules>
+
+</labwc_config>

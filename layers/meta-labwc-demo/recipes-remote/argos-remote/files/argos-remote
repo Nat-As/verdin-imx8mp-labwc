@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Remote desktop (RustDesk) of the labwc demo image.
+
+  argos-remote info [--json]
+      IDs, direct IP ports and state of the RustDesk servers, and the
+      board's IP addresses. Passwords are shown for your own session
+      (root: all sessions).
+  argos-remote password SESSION (--random | PASSWORD) [--json]
+      Set the permanent password of SESSION (kiosk or admin) and restart its
+      server. Allowed for root and for the session's user.
+  argos-remote restart SESSION
+      Restart the RustDesk server of SESSION (root or the session's user).
+  argos-remote test SESSION [--click X Y]
+      Check screen capture (and with --click, input) of SESSION through the
+      portal, without a RustDesk client: saves the captured screen as
+      /tmp/argos-remote-test-SESSION.png (root or the session's user).
+
+Sessions: kiosk = the touch screen (desktop user, mirrored), admin = the
+unattended headless desktop of the admin user. Connect from a RustDesk
+client by ID, or by IP address and port with "direct IP access"
+(<board IP>:<port>). Settings: /etc/default/argos-remote.
+"""
+import json
+import os
+import pwd
+import re
+import secrets
+import subprocess
+import sys
+
+SESSIONS = {
+    "kiosk": {"user": "@DESKTOP_USER@", "description": "Touch screen (mirror)",
+              "port_var": "ARGOS_REMOTE_KIOSK_PORT", "port": 21118},
+    "admin": {"user": "@ADMIN_USER@", "description": "Admin desktop (unattended)",
+              "port_var": "ARGOS_REMOTE_ADMIN_PORT", "port": 21119},
+}
+STATUS_DIR = "/run/argos-remote"
+PORTAL_TEST = "/usr/libexec/argos-remote/portal-test"
+DEFAULTS = "/etc/default/argos-remote"
+PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+# Stored as a TOML literal string by argos-remote-server: no quotes or
+# backslashes; RustDesk treats values starting with 00/01 as encoded
+PASSWORD_RE = re.compile(r"^[A-Za-z0-9!#$%&()*+,./:;<=>?@^_{|}~-]{8,64}$")
+
+
+def defaults():
+    values = {}
+    try:
+        with open(DEFAULTS) as f:
+            for line in f:
+                m = re.match(r"^\s*([A-Z_]+)=(.*?)\s*$", line)
+                if m:
+                    values[m.group(1)] = m.group(2).strip("'\"")
+    except OSError:
+        pass
+    return values
+
+
+def user_info(name):
+    try:
+        return pwd.getpwnam(name)
+    except KeyError:
+        return None
+
+
+def config_dir(pw):
+    return os.path.join(pw.pw_dir, ".config", "argos-remote")
+
+
+def may_manage(session):
+    if os.geteuid() == 0:
+        return True
+    pw = user_info(SESSIONS[session]["user"])
+    return pw is not None and pw.pw_uid == os.geteuid()
+
+
+def read_file(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def pid_is_rustdesk(pid):
+    try:
+        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+            return b"rustdesk" in f.read()
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def session_info(name, conf):
+    spec = SESSIONS[name]
+    pw = user_info(spec["user"])
+    status = {}
+    try:
+        with open(os.path.join(STATUS_DIR, f"{name}.json")) as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        pass
+    port = status.get("port") or int(conf.get(spec["port_var"], spec["port"]) or spec["port"])
+    info = {
+        "name": name,
+        "description": spec["description"],
+        "user": spec["user"],
+        "id": status.get("id"),
+        "port": port,
+        "running": pid_is_rustdesk(status.get("pid")),
+        "password": None,
+    }
+    if pw is not None and may_manage(name):
+        cdir = config_dir(pw)
+        info["id"] = info["id"] or read_file(os.path.join(cdir, "id"))
+        info["password"] = read_file(os.path.join(cdir, "password"))
+    return info
+
+
+def addresses():
+    try:
+        out = subprocess.run(["ip", "-o", "-4", "addr", "show", "scope", "global"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [m.group(1) for m in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)/", out)]
+
+
+def systemctl_user(session, *args):
+    """Run systemctl --user for the session's user (as root: via -M)."""
+    if os.geteuid() == 0:
+        cmd = ["systemctl", "--user", "-M", f"{SESSIONS[session]['user']}@"] + list(args)
+    else:
+        cmd = ["systemctl", "--user"] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+
+def print_info(infos, addrs, as_json):
+    if as_json:
+        print(json.dumps({"addresses": addrs, "sessions": infos}))
+        return
+    print("Board IP addresses: " + (", ".join(addrs) if addrs else "none"))
+    for s in infos:
+        print()
+        print(f"{s['name']}: {s['description']} - user {s['user']}")
+        print(f"  RustDesk server: {'running' if s['running'] else 'not running'}")
+        print(f"  ID:              {s['id'] or 'unknown (not started yet)'}")
+        print(f"  Direct IP:       " + (", ".join(f"{a}:{s['port']}" for a in addrs) or f"<IP>:{s['port']}"))
+        if s["password"] is not None:
+            print(f"  Password:        {s['password']}")
+        else:
+            print("  Password:        (sudo argos-remote info)")
+
+
+def cmd_info(args):
+    as_json = "--json" in args
+    conf = defaults()
+    infos = [session_info(name, conf) for name in SESSIONS]
+    print_info(infos, addresses(), as_json)
+    return 0
+
+
+def cmd_password(args):
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    if len(args) != 2 or args[0] not in SESSIONS:
+        print(__doc__, file=sys.stderr)
+        return 2
+    session, value = args
+    if not may_manage(session):
+        print(f"argos-remote: only root or {SESSIONS[session]['user']} may change this password",
+              file=sys.stderr)
+        return 1
+    if value == "--random":
+        value = "".join(secrets.choice(PASSWORD_CHARS) for _ in range(10))
+    elif not PASSWORD_RE.match(value) or value.startswith(("00", "01")):
+        print("argos-remote: the password must be 8-64 characters (letters, digits and "
+              "!#$%&()*+,./:;<=>?@^_{|}~-, no quotes or spaces, not starting with 00/01)",
+              file=sys.stderr)
+        return 2
+    pw = user_info(SESSIONS[session]["user"])
+    if pw is None:
+        print(f"argos-remote: user {SESSIONS[session]['user']} does not exist", file=sys.stderr)
+        return 1
+    cdir = config_dir(pw)
+    os.makedirs(cdir, mode=0o700, exist_ok=True)
+    old_umask = os.umask(0o077)
+    try:
+        for name, content in (("password", value + "\n"), ("password.pending", "")):
+            path = os.path.join(cdir, name)
+            with open(path, "w") as f:
+                f.write(content)
+            if os.geteuid() == 0:
+                os.chown(path, pw.pw_uid, pw.pw_gid)
+        if os.geteuid() == 0:
+            os.chown(cdir, pw.pw_uid, pw.pw_gid)
+    finally:
+        os.umask(old_umask)
+    # Applied by argos-remote-server when it (re)starts
+    systemctl_user(session, "try-restart", "argos-remote.service")
+    info = session_info(session, defaults())
+    info["password"] = value
+    if as_json:
+        print(json.dumps(info))
+    else:
+        print(f"{session}: new password {value}")
+    return 0
+
+
+def cmd_restart(args):
+    if len(args) != 1 or args[0] not in SESSIONS:
+        print(__doc__, file=sys.stderr)
+        return 2
+    if not may_manage(args[0]):
+        print(f"argos-remote: only root or {SESSIONS[args[0]]['user']} may restart this server",
+              file=sys.stderr)
+        return 1
+    r = systemctl_user(args[0], "restart", "argos-remote.service")
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
+def cmd_test(args):
+    if not args or args[0] not in SESSIONS or len(args) not in (1, 4) or \
+            (len(args) == 4 and args[1] != "--click"):
+        print(__doc__, file=sys.stderr)
+        return 2
+    session = args[0]
+    if not may_manage(session):
+        print(f"argos-remote: only root or {SESSIONS[session]['user']} may test this session",
+              file=sys.stderr)
+        return 1
+    pw = user_info(SESSIONS[session]["user"])
+    if pw is None:
+        print(f"argos-remote: user {SESSIONS[session]['user']} does not exist", file=sys.stderr)
+        return 1
+    png = f"/tmp/argos-remote-test-{session}.png"
+    cmd = [PORTAL_TEST, "--png", png] + args[1:]
+    if os.geteuid() == 0:
+        runtime = f"/run/user/{pw.pw_uid}"
+        cmd = ["runuser", "-u", pw.pw_name, "--", "env", f"XDG_RUNTIME_DIR={runtime}",
+               f"DBUS_SESSION_BUS_ADDRESS=unix:path={runtime}/bus"] + cmd
+    return subprocess.run(cmd).returncode
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    commands = {"info": cmd_info, "status": cmd_info, "password": cmd_password,
+                "restart": cmd_restart, "test": cmd_test}
+    if argv[0] not in commands:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return commands[argv[0]](argv[1:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

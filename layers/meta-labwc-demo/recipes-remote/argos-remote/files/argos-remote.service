@@ -1,0 +1,19 @@
+# RustDesk server of the current labwc session (systemd user unit).
+# Started by argos-remote-session from the labwc autostart, which sets
+# ARGOS_REMOTE_SESSION and WAYLAND_DISPLAY in the user manager. Log:
+#   journalctl --user -u argos-remote (as the session user), RustDesk's own
+#   log in ~/.local/share/logs/RustDesk/server/
+[Unit]
+Description=RustDesk remote desktop server (%u, argos-remote)
+Documentation=https://rustdesk.com/docs/
+Wants=pipewire.socket wireplumber.service
+After=pipewire.socket wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/argos-remote/argos-remote-server
+SyslogIdentifier=argos-remote
+Restart=always
+RestartSec=5
+# RustDesk starts helper processes (tray, connection manager); stop them too
+KillMode=control-group

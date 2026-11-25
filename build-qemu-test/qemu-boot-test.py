@@ -10,8 +10,14 @@ to the pixman renderer here.
 
 Usage: qemu-boot-test.py <Image> <disk.wic> <workdir>
 Produces <workdir>/serial.log, <workdir>/diag.txt and <workdir>/screen-*.png.
+
+EXTRA_CMDS=<file>: more commands (one per line, run as root after the standard
+checks, output in diag.txt). PULL_FILES="<guest path> ...": copy these files
+from the guest into <workdir> afterwards (base64 over the serial console).
 """
+import base64
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -178,6 +184,20 @@ try:
         "journalctl -b --no-pager _UID=1000 -o cat | grep -E 'labwc-session|Creating .* renderer|GLES2|EGL|Failed|ERROR' | head -30",
     ]:
         diag.append(f"$ {cmd}\n{run(cmd)}\n")
+    extra = os.environ.get("EXTRA_CMDS")
+    if extra:
+        for cmd in open(extra).read().splitlines():
+            if cmd.strip() and not cmd.lstrip().startswith("#"):
+                diag.append(f"$ {cmd}\n{run(cmd, timeout=300)}\n")
+    for path in os.environ.get("PULL_FILES", "").split():
+        out = run(f"base64 -w0 {path}; echo")
+        blobs = re.findall(r"[A-Za-z0-9+/=]{64,}", out)
+        if blobs:
+            with open(os.path.join(work, os.path.basename(path)), "wb") as f:
+                f.write(base64.b64decode(max(blobs, key=len)))
+            diag.append(f"$ pull {path}: ok\n")
+        else:
+            diag.append(f"$ pull {path}: not found\n")
     # Launch a terminal into the running session as the desktop user
     # (LAUNCH: another command line, e.g. a .desktop Exec line; no ' quotes)
     launch = os.environ.get("LAUNCH", "foot -T htop htop")

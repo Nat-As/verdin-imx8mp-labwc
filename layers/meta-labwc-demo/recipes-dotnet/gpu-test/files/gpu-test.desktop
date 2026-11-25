@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=GPU Test
-Comment=Rotating cyclohexane molecule rendered with OpenGL ES (C#/.NET), with the frame rate
+Comment=Rotating molecule rendered with OpenGL ES and system settings (C#/.NET, Avalonia)
 Exec=gpu-test --journal
 Icon=gpu-test
 Terminal=false

@@ -3,8 +3,12 @@
 // Wayland backend, GPU rendered, 40 % opaque background) and shows the
 // measured frame rate in the top right corner.
 //
-//   gpu-test [--frames N] [--headless [--snapshot FILE.ppm]]
+//   gpu-test [--kiosk] [--frames N] [--headless [--snapshot FILE.ppm]]
 //
+// The window has a navigation bar at the bottom (Home: the molecule,
+// Settings: system settings). --kiosk opens it full screen without
+// decorations (kiosk session on the touch display; ARGOS_KIOSK_OUTPUT=<output>
+// picks the screen).
 // --frames exits after N frames (and prints the average frame rate);
 // --headless renders off-screen (EGL on the GPU render node, 900x560, no
 // vsync) without a window, to measure the GPU without the compositor;
@@ -30,7 +34,7 @@ namespace GpuTest
 
         private static int Main(string[] args)
         {
-            bool headless = false;
+            bool headless = false, kiosk = false;
             int maxFrames = 0;
             string snapshot = null;
             for (int i = 0; i < args.Length; i++)
@@ -40,9 +44,10 @@ namespace GpuTest
                     case "--frames": maxFrames = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
                     case "--snapshot": snapshot = args[++i]; break;
                     case "--headless": headless = true; break;
+                    case "--kiosk": kiosk = true; break;
                     case "--no-vsync": break;   // v0.2.0 option; the window always follows the display
                     default:
-                        Console.Error.WriteLine("usage: gpu-test [--frames N] [--headless [--snapshot FILE.ppm]]");
+                        Console.Error.WriteLine("usage: gpu-test [--kiosk] [--frames N] [--headless [--snapshot FILE.ppm]]");
                         return 2;
                 }
             }
@@ -59,6 +64,7 @@ namespace GpuTest
                 return RunHeadless(maxFrames > 0 ? maxFrames : 600, snapshot);
 
             App.Options.MaxFrames = maxFrames;
+            App.Options.Kiosk = kiosk;
             if (int.TryParse(Environment.GetEnvironmentVariable("GPU_TEST_MAX_FPS"), NumberStyles.Integer,
                     CultureInfo.InvariantCulture, out int maxFps) && maxFps >= 0)
                 App.Options.MaxFps = maxFps;

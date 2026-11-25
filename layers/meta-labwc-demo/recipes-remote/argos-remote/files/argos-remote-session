@@ -1,0 +1,45 @@
+#!/bin/sh
+# Start the remote desktop server of a labwc session. Called from the labwc
+# autostart of the kiosk (touch screen) and admin (headless) sessions:
+#
+#   argos-remote-session kiosk|admin [OUTPUT]
+#
+# OUTPUT: the output to capture (kiosk: the one the app is on); default the
+# first output. Passes the session environment to the user's systemd
+# instance, where the portals (D-Bus activated), PipeWire and RustDesk
+# (argos-remote.service) run, and (re)starts them for this compositor.
+# Disabled per session in /etc/default/argos-remote.
+session=$1
+output=${2:-}
+
+# shellcheck source=/dev/null
+[ -r /etc/default/argos-remote ] && . /etc/default/argos-remote
+case $session in
+kiosk) enabled=${ARGOS_REMOTE_KIOSK:-1} ;;
+admin) enabled=${ARGOS_REMOTE_ADMIN:-1} ;;
+*) echo "usage: argos-remote-session kiosk|admin [OUTPUT]" >&2; exit 2 ;;
+esac
+
+log() { echo "argos-remote-session: $*"; }
+
+if [ "$enabled" != 1 ]; then
+    log "remote desktop for the $session session is disabled in /etc/default/argos-remote"
+    systemctl --user stop argos-remote.service 2>/dev/null
+    exit 0
+fi
+
+export ARGOS_REMOTE_SESSION=$session ARGOS_REMOTE_OUTPUT=$output
+export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-labwc:wlroots}
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
+    XDG_SESSION_TYPE ARGOS_REMOTE_SESSION ARGOS_REMOTE_OUTPUT || {
+    log "no systemd user instance; remote desktop not started"
+    exit 1
+}
+
+# A previous compositor instance (session restart) leaves portals connected
+# to its socket: restart them with the new environment
+systemctl --user stop argos-remote.service xdg-desktop-portal-wlr.service \
+    xdg-desktop-portal.service 2>/dev/null
+systemctl --user start pipewire.socket pipewire.service wireplumber.service
+systemctl --user start argos-remote.service
+log "remote desktop server started for the $session session${output:+ (output $output)}"

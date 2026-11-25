@@ -1,0 +1,5 @@
+# Status of the RustDesk servers (argos-remote info); each file is written by
+# its session's user only
+d /run/argos-remote 0755 root root -
+f /run/argos-remote/kiosk.json 0644 @DESKTOP_USER@ @DESKTOP_USER@ -
+f /run/argos-remote/admin.json 0644 @ADMIN_USER@ @ADMIN_USER@ -

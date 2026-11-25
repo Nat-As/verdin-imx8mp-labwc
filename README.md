@@ -6,9 +6,11 @@
 [![license](https://img.shields.io/github/license/Nat-As/verdin-imx8mp-labwc?label=license)](LICENSE)
 
 A Yocto image, built from source on the Toradex BSP 7.7.0, that boots a **Verdin iMX8M Plus** on
-the **Mallow** carrier board straight into a minimal **labwc** Wayland desktop. labwc runs directly
-on DRM/KMS, with no X11 or Xwayland, and renders on the GPU (OpenGL ES). The desktop
-shows on the **Toradex Capacitive Touch Display 7" DSI** (1024x600, touch enabled) and on HDMI.
+the **Mallow** carrier board straight into a **labwc** Wayland session. labwc runs directly
+on DRM/KMS, with no X11 or Xwayland, and renders on the GPU (OpenGL ES). The touch screen
+(**Toradex Capacitive Touch Display 7" DSI**, 1024x600) shows a full-screen **Avalonia app** with
+system settings (kiosk), or the labwc desktop; HDMI works too. With **RustDesk**, the touch screen
+can be mirrored, and an unattended desktop of the administrator runs in the background.
 
 The image includes the complete GPU, NPU and VPU stack of the i.MX 8M Plus (OpenGL ES, OpenCL,
 OpenVX, G2D, TensorFlow Lite with the NPU delegate, hardware video codecs), so it can be used as
@@ -30,7 +32,9 @@ OpenCV and Java applications.
 | | Included |
 |---|---|
 | Boot | Boot animation (Alakai logo, spinner and image version) from the moment the display comes up until the desktop is ready; no kernel or boot messages on the screen |
+| Touch screen | Kiosk: the **GPU Test** app full screen (Avalonia 12.1.4): rotating molecule (OpenGL ES) and **system settings** (network, display, date and time, remote desktop, system, build info) with an on-screen keyboard. Switchable to the desktop |
 | Desktop | labwc 0.7.1 (wlroots 0.17.2), GPU rendered (OpenGL ES), waybar panel, fuzzel launcher, foot terminal, swaybg wallpaper |
+| Remote desktop | **RustDesk 1.5.3**: mirror of the touch screen, and an unattended desktop of the admin user (headless labwc); direct IP access or by ID. xdg-desktop-portal-wlr 0.9.0 with RemoteDesktop, PipeWire |
 | GPU | Vivante GC7000UL: OpenGL ES, EGL/GBM, OpenCL, G2D (2D blitter), `clinfo`, `glmark2` (**GPU Benchmark** in the launcher), `gmem_info` |
 | NPU | 2.3 TOPS NPU: OpenVX with NN extensions, RapidOpenVX, TIM-VX, TensorFlow Lite 2.16 (C++ and Python `tflite_runtime`) with the VX delegate |
 | Video | Hantro VPU (H.264/H.265/VP9 decode, H.264/H.265 encode) with GStreamer plugins |
@@ -38,7 +42,7 @@ OpenCV and Java applications.
 | Networking | NetworkManager (`nmtui`, `nmcli`), Bluetooth (BlueZ, Blueman), SSH server (dropbear) |
 | Tools | nano, neofetch, htop, tmux, tree, git, curl, wget, rsync, nmap, gzip, man (with man pages) |
 | Development | gcc/g++, make, cmake, meson, ninja, gdb, and headers for every installed library (incl. Wayland) |
-| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** demo app (C#, Avalonia 12.1.4 on Wayland, OpenGL ES) |
+| C# / .NET | .NET 10 LTS (runtime and SDK), OpenCvSharp for OpenCV with OpenCL, offline NuGet feed; **GPU Test** app (C#, Avalonia 12.1.4 on Wayland, OpenGL ES) |
 | Java 25 LTS | Java Runtime Environment: Eclipse Temurin JRE 25.0.5 (OpenJDK HotSpot), `java`, `keytool`, `jfr`, `jwebserver`; `JAVA_HOME` set |
 | Python 3.12 | numpy, scipy, pandas, matplotlib, OpenCV (with OpenCL), TensorFlow Lite, Pillow, PyQt6, tkinter, pip, the full standard library |
 | Qt | Qt 6.11 (Qt Base, Wayland, Declarative/QML, SVG) |
@@ -46,12 +50,12 @@ OpenCV and Java applications.
 
 ## Download and install
 
-**Release v1.0.1:**
-**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar)** (642 MB)
+**Release v1.0.2:**
+**[⬇ Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.2.tar](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.2.tar)** (671 MB)
 
-SHA-256: `392ad0ad905c7f4eb95bc165700e89ffb3db6d01b72463f35c6f31a3320f2ece`
-([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.1/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar.sha256),
-[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v1.0.1),
+SHA-256: `2ac590a7d2790d79c234a860d67b23f447430a1055cdf89947003e2f5609926d`
+([checksum file](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/download/v1.0.2/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.2.tar.sha256),
+[release notes](https://github.com/Nat-As/verdin-imx8mp-labwc/releases/tag/v1.0.2),
 [all releases](https://github.com/Nat-As/verdin-imx8mp-labwc/releases))
 
 Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-installer/toradex-easy-installer/) (Tezi):
@@ -59,7 +63,7 @@ Install it with [Toradex Easy Installer](https://developer.toradex.com/easy-inst
 1. Start the module in Tezi ([recovery mode](https://developer.toradex.com/hardware/hardware-resources/recovery-mode/imx-recovery-mode/)).
 2. Extract the tarball onto a FAT32 or ext4 formatted USB stick or SD card:
    ```sh
-   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar -C /media/<stick>/
+   tar -xf Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.2.tar -C /media/<stick>/
    ```
 3. Plug the stick into the Mallow board. Tezi lists **"Toradex Embedded Linux labwc Demo Image"**.
 4. Select it, click **Install**, accept the NXP EULA, and click **Reboot** when it finishes.
@@ -78,9 +82,9 @@ In recovery mode, Tezi also runs a network over the USB OTG cable (USB NCM/RNDIS
 image to Tezi over that link and announces it with Zeroconf, so Tezi lists it by itself:
 
 ```sh
-./serve-tezi.sh v1.0.1                      # release/v1.0.1/...Tezi_v1.0.1.tar
+./serve-tezi.sh v1.0.2                      # release/v1.0.2/...Tezi_v1.0.2.tar
 ./serve-tezi.sh build                       # the current build
-./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.1.tar
+./serve-tezi.sh ~/Downloads/Verdin-iMX8MP_labwc-Demo-Image-Tezi_v1.0.2.tar
 ```
 
 Then install it in Tezi as above; Ctrl+C stops the server when Tezi has finished. The script
@@ -164,7 +168,73 @@ The hostname is `argos-<serial-number>` (for example `argos-15629353`), and mDNS
 > **Change both passwords** (`passwd`) before connecting the board to anything other than a lab
 > network.
 
+## Touch screen app
+
+After boot, the touch screen shows the **GPU Test** app full screen (the kiosk session). A bar at the
+bottom is the same on every page; from left to right:
+
+| Button | Page |
+|---|---|
+| Home | Rotating cyclohexane molecule rendered with OpenGL ES on the GPU, with the frame rate |
+| Menu, Library | Not used yet |
+| Settings | System settings |
+
+The settings:
+
+| Page | Contents |
+|---|---|
+| Network | Ethernet and Wi-Fi: state, IP address, gateway, DNS, MAC; IPv4 method (DHCP, static, link-local, disabled) with address, gateway and DNS; Wi-Fi on/off, scan, connect (also hidden networks), disconnect, forget |
+| Display | Brightness, connected outputs and modes |
+| Date & Time | System time, hardware clock (RTC), time zone, automatic time (NTP), set date and time, save to the RTC |
+| Remote Desktop | RustDesk IDs, ports and state, the touch screen's password (new random password) |
+| System | Host name, uptime, CPU temperature, memory, storage, touch screen mode (kiosk or desktop), reboot, power off |
+| About | Image version, OS, kernel, board model and serial number, BSP, build date, .NET, Avalonia, Java, GPU driver, CPU |
+
+Text fields open an on-screen keyboard. The app uses NetworkManager (`nmcli`) directly; time, time
+zone, host name and the screen mode go through `/usr/libexec/argos/argos-settings-helper` (sudo
+without password for the desktop and admin users, every argument is checked).
+
+To show the labwc desktop on the touch screen instead, choose **Desktop** in Settings > System, or set
+`LABWC_DEMO_SESSION=desktop` in `/etc/default/labwc` and run `sudo systemctl restart labwc`. The
+GPU Test app is also in the desktop's launcher.
+
+## Remote desktop (RustDesk)
+
+Two [RustDesk](https://rustdesk.com) servers run on the board, one per desktop:
+
+| Session | What you see | User | Direct IP port |
+|---|---|---|---|
+| `kiosk` | Mirror of the touch screen (the app or the desktop), with mouse and keyboard | `argos_user` | 21118 |
+| `admin` | Unattended desktop of the administrator (labwc on a 1280x800 virtual output, no display needed) | `alakai_admin` | 21119 |
+
+Each server has its own RustDesk ID and permanent password, created on the first boot. Show them
+(over SSH, as the admin):
+
+```sh
+sudo argos-remote info
+```
+
+Connect from a [RustDesk client](https://rustdesk.com/download) on the PC: enter the board's address
+and port, for example `192.168.1.50:21119` for the admin desktop ("direct IP access", works in the
+local network without any server), or the ID (through RustDesk's public servers, needs internet), and
+the password. Change a password with `sudo argos-remote password admin <new password>` (or
+`--random`); the touch screen's password can also be renewed in the app (Settings > Remote Desktop).
+
+`sudo argos-remote test admin` checks screen capture through the portal without a client and saves
+the captured screen to `/tmp/argos-remote-test-admin.png`. Settings (ports, frame rate, own RustDesk
+server, turning a server off) are in `/etc/default/argos-remote`; the size of the admin desktop is in
+`/etc/default/labwc-admin`. Logs: `journalctl -t argos-remote`, `journalctl -t labwc-admin`, and
+RustDesk's own log in `~/.local/share/logs/RustDesk/server/` of the session's user.
+
+RustDesk normally runs as a root service that only serves the logged-in seat and injects input with
+uinput. Here each desktop has its own RustDesk process in the session, which captures the screen and
+injects input through the xdg-desktop-portal **RemoteDesktop** interface: xdg-desktop-portal-wlr 0.9.0
+with the RemoteDesktop support of its pull request #325 (wlr-screencopy, virtual pointer and
+keyboard), so the input goes to exactly that desktop. The admin desktop is rendered on the CPU.
+
 ## Use the desktop
+
+In the desktop session (touch screen in desktop mode, or the admin desktop over RustDesk):
 
 | Action | How |
 |---|---|
@@ -265,10 +335,11 @@ of the `video` group (the desktop user is) or as root.
 dotnet new console -o hello && cd hello && dotnet run
 ```
 
-**GPU Test** (in the application launcher, or `gpu-test`) is a C# demo built with
-[Avalonia](https://avaloniaui.net) 12.1: a rotating cyclohexane molecule rendered with OpenGL ES on
-the GPU, with the measured frame rate in the top right corner, in a window with a 40 % opaque
-background. It uses Avalonia's native Wayland backend (`Avalonia.Wayland`, `UseWayland()`), which
+**GPU Test** (the touch screen app, see [Touch screen app](#touch-screen-app); in the desktop's
+launcher, or `gpu-test`) is a C# app built with [Avalonia](https://avaloniaui.net) 12.1 (Fluent
+theme): a rotating cyclohexane molecule rendered with OpenGL ES on the GPU, with the measured frame
+rate in the top right corner, and the system settings. `gpu-test --kiosk` runs it full screen (the
+kiosk session does); as a desktop window it has a 40 % opaque background. It uses Avalonia's native Wayland backend (`Avalonia.Wayland`, `UseWayland()`), which
 renders the whole window with OpenGL ES through EGL, so no X server is needed and the UI stays
 hardware accelerated. The window runs at up to 60 FPS (`GPU_TEST_MAX_FPS=<n>`, `0` for no limit);
 `gpu-test --headless` measures the GPU without a window. **GPU Benchmark** in the launcher
@@ -307,7 +378,10 @@ Java programs run headless (console, network and server applications, image proc
 | Panel | `/etc/xdg/waybar/` (per user: `~/.config/waybar/`) |
 | Terminal and launcher | `/etc/xdg/foot/foot.ini`, `/etc/xdg/fuzzel/fuzzel.ini` |
 | fish | `/etc/fish/` (per user: `~/.config/fish/`) |
-| Session settings (renderer order, debug logging) | `/etc/default/labwc` |
+| Session settings (kiosk or desktop, renderer order, debug logging) | `/etc/default/labwc` |
+| Kiosk session (app, window rules) | `/etc/xdg/labwc-kiosk/` |
+| Admin desktop (resolution, renderer) | `/etc/default/labwc-admin`, `/etc/xdg/labwc-admin/` |
+| Remote desktop (RustDesk ports, servers) | `/etc/default/argos-remote` |
 | Display overlays | `/boot/overlays.txt` (reboot after a change) |
 | Boot splash | Theme `/usr/share/plymouth/themes/argos/`, settings `/etc/plymouth/plymouthd.conf` |
 
@@ -364,8 +438,8 @@ behind the Mallow USB hub while its driver initializes it.
 
 This repository is released under the [MIT License](LICENSE).
 
-The image also contains third-party software under its own licenses, including GPL/LGPL components and
-NXP proprietary GPU/VPU firmware and libraries under the NXP Software License Agreement, which
+The image also contains third-party software under its own licenses, including GPL/LGPL components, RustDesk
+(AGPL-3.0) and NXP proprietary GPU/VPU firmware and libraries under the NXP Software License Agreement, which
 Tezi shows before installing. License texts for every package are installed in
 `/usr/share/common-licenses/` on the board.
 

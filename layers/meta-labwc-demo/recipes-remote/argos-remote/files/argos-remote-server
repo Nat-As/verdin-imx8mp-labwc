@@ -1,0 +1,160 @@
+#!/bin/bash
+# RustDesk server for one desktop session. Runs as the session's user from
+# argos-remote.service (systemd user unit), which argos-remote-session starts
+# from the labwc autostart with ARGOS_REMOTE_SESSION=kiosk|admin.
+#
+# RustDesk normally runs as a root service (rustdesk --service) that follows
+# logind's seat0 session and injects input with uinput. That cannot serve the
+# headless admin desktop (no seat) and would put input from both desktops into
+# the physical one. Here each desktop gets its own RustDesk process in the
+# session, which captures the screen and injects pointer/keyboard input
+# through the xdg-desktop-portal RemoteDesktop interface
+# (xdg-desktop-portal-wlr with the RemoteDesktop patch), i.e. into exactly
+# this compositor.
+#
+# "--quick_support --server": RustDesk's core runs the server without UI for
+# "--server", but it selects uinput input (only available from the root
+# service) when argv[1] is "--server". "--quick_support" (only used on
+# Windows) is dropped by the argument parser and makes argv[1] differ, so the
+# server uses the portal for input as RustDesk's own GUI process does.
+#
+# Configuration: /etc/default/argos-remote. Unattended access with a
+# permanent password (direct IP access on the session's port, or by ID
+# through the rendezvous server). The ID and password are created on the
+# first start in ~/.config/argos-remote/; show them with argos-remote info.
+set -u
+
+session=${ARGOS_REMOTE_SESSION:-}
+# shellcheck source=/dev/null
+[ -r /etc/default/argos-remote ] && . /etc/default/argos-remote
+
+case $session in
+kiosk)
+    port=${ARGOS_REMOTE_KIOSK_PORT:-21118}
+    description="Touch screen (mirror)"
+    output=${ARGOS_REMOTE_OUTPUT:-}
+    ;;
+admin)
+    port=${ARGOS_REMOTE_ADMIN_PORT:-21119}
+    description="Admin desktop (unattended)"
+    output=
+    ;;
+*)
+    echo "argos-remote-server: ARGOS_REMOTE_SESSION must be kiosk or admin (got '$session')" >&2
+    exit 1
+    ;;
+esac
+
+log() { echo "argos-remote-server[$session]: $*"; }
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    log "WAYLAND_DISPLAY is not set (start through argos-remote-session)"
+    exit 1
+fi
+
+config=${XDG_CONFIG_HOME:-$HOME/.config}
+rd_dir=$config/rustdesk
+ar_dir=$config/argos-remote
+mkdir -p "$rd_dir" "$ar_dir" "$config/xdg-desktop-portal-wlr"
+chmod 0700 "$rd_dir" "$ar_dir"
+umask 077
+
+# --- ID and password (first start, or changed with argos-remote password) ---
+
+# 9 digits, like RustDesk's own IDs. RustDesk derives its default ID from the
+# MAC address, which would give both desktops of the board the same ID.
+if [ ! -s "$ar_dir/id" ]; then
+    id=$(( $(od -An -N4 -tu4 /dev/urandom) % 900000000 + 100000000 ))
+    echo "$id" > "$ar_dir/id"
+    log "new RustDesk ID $id"
+fi
+id=$(cat "$ar_dir/id")
+
+# No 0/1 (RustDesk treats passwords starting with "00"/"01" as encoded) and
+# no look-alike characters
+if [ ! -s "$ar_dir/password" ]; then
+    tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom 2>/dev/null | head -c 10 > "$ar_dir/password"
+    : > "$ar_dir/password.pending"
+    log "new permanent password (argos-remote info shows it)"
+fi
+
+toml=$rd_dir/RustDesk.toml
+toml2=$rd_dir/RustDesk2.toml
+
+# Set top-level key $2 = '$3' in TOML file $1 (literal string; the values
+# never contain single quotes). Top-level keys must precede the first table.
+toml_set_top() {
+    awk -v k="$2" -v v="$3" '
+        BEGIN { done = 0 }
+        /^\[/ && !done { print k " = '\''" v "'\''"; done = 1 }
+        $1 == k && $2 == "=" && !done { next }
+        { print }
+        END { if (!done) print k " = '\''" v "'\''" }
+    ' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
+[ -e "$toml" ] || { echo "id = '$id'" > "$toml"; : > "$ar_dir/password.pending"; }
+if [ -e "$ar_dir/password.pending" ]; then
+    # Plain text here; RustDesk stores it hashed (salted) on its next write
+    toml_set_top "$toml" password "$(cat "$ar_dir/password")"
+    rm -f "$ar_dir/password.pending"
+    log "permanent password set"
+fi
+
+# RustDesk2.toml [options]: replace the options managed here, keep the rest
+options="direct-server=Y
+direct-access-port=$port
+verification-method=use-permanent-password
+approve-mode=password
+allow-hide-cm=Y
+enable-check-update=N
+allow-auto-update=N
+stop-service=N
+custom-rendezvous-server=${ARGOS_REMOTE_ID_SERVER:-}
+relay-server=${ARGOS_REMOTE_RELAY_SERVER:-}
+key=${ARGOS_REMOTE_KEY:-}"
+[ -e "$toml2" ] || : > "$toml2"
+awk -v opts="$options" '
+    BEGIN {
+        n = split(opts, lines, "\n")
+        for (i = 1; i <= n; i++) {
+            eq = index(lines[i], "=")
+            key[i] = substr(lines[i], 1, eq - 1); val[i] = substr(lines[i], eq + 1)
+            managed[key[i]] = 1
+        }
+    }
+    function emit(  i) { for (i = 1; i <= n; i++) print key[i] " = '\''" val[i] "'\''" }
+    /^\[/ { in_opts = ($0 == "[options]") }
+    in_opts && ($1 in managed) && $2 == "=" { next }
+    { print }
+    $0 == "[options]" { emit(); seen = 1 }
+    END { if (!seen) { print ""; print "[options]"; emit() } }
+' "$toml2" > "$toml2.tmp" && mv "$toml2.tmp" "$toml2"
+
+# --- Screen capture: xdg-desktop-portal-wlr without a chooser dialog ---
+# Captures $output (kiosk: the output the app is on), or the first output.
+cat > "$config/xdg-desktop-portal-wlr/config" <<EOF
+# Written by argos-remote-server ($session); overwritten on every start.
+[screencast]
+chooser_type=none
+output_name=$output
+max_fps=${ARGOS_REMOTE_MAX_FPS:-30}
+
+[remotedesktop]
+# 1 = allowed (xdg-desktop-portal-wlr reads only "1" as true)
+allow_pointer=1
+allow_keyboard=1
+EOF
+
+# --- Status for argos-remote info (no secrets) ---
+status=/run/argos-remote/$session.json
+if [ -w "$status" ]; then
+    printf '{"name":"%s","description":"%s","user":"%s","id":"%s","port":%s,"pid":%s,"output":"%s"}\n' \
+        "$session" "$description" "$(id -un)" "$id" "$port" "$$" "$output" > "$status"
+else
+    log "cannot write $status"
+fi
+
+log "starting RustDesk (ID $id, direct IP port $port${output:+, output $output})"
+export RUSTDESK_FORCED_DISPLAY_SERVER=wayland
+exec /usr/share/rustdesk/rustdesk --quick_support --server

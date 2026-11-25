@@ -1,6 +1,16 @@
 # Environment for labwc.service (read by systemd, then by labwc-session).
 # Apply changes with: sudo systemctl restart labwc
 #
+# What the touch screen shows:
+#   kiosk    the GPU Test app full screen, nothing else (default)
+#   desktop  the labwc desktop with panel, launcher and windows
+# Also switchable in the app: Settings > System.
+LABWC_DEMO_SESSION=kiosk
+#
+# Output of the kiosk app and of the remote desktop mirror (default: the 7"
+# panel LVDS-1 if connected, otherwise the first output)
+#LABWC_KIOSK_OUTPUT=HDMI-A-1
+#
 # Renderer: labwc-session tries these renderer strategies in order and falls
 # back to the next one if labwc crashes, hangs or logs renderer errors during
 # startup (see /usr/bin/labwc-session):
